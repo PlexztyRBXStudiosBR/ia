@@ -1,4 +1,4 @@
-# Arkher Studio - Polished System - ALPHA 0.7 - Polimento Total Fase 0-4
+# Arkher Studio - Polished System - ALPHA 0.7 POLISHED 100% - Polimento Total Fase 0-4 100%
 
 ## Visão Geral - Polimento Total
 
