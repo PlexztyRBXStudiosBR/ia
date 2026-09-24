@@ -63,9 +63,10 @@ end
 
 function MainController:Init()
 	print("========================================")
-	print("  ARKHER STUDIO - ALPHA 0.3 - FASE 1.5")
-	print("  15GB Worlds + Python 3.14 + IA em tudo")
-	print("  MVP Mobile + Mata Studio Lite")
+	print("  ARKHER STUDIO - ALPHA 0.4 - FASE 2")
+	print("  Scripting Pro + 15GB + Python 3.14 + IA em tudo")
+	print("  Monaco Editor + Visual Blockly + Sandbox + Debugger")
+	print("  Mata Studio X")
 	print("========================================")
 
 	local player = Players.LocalPlayer
@@ -159,7 +160,7 @@ function MainController:Init()
 		self.toolbar:Init(self.ui.viewport)
 	end
 
-	-- ScriptEditor - Luau + Python 3.14 + Visual + AI
+	-- ScriptEditor Pro - Monaco + Visual + Python 3.14 + AI + Debugger + Sandbox
 	self:CreateScriptEditorTab()
 
 	-- Demo world
@@ -172,20 +173,39 @@ function MainController:Init()
 	-- Materializa
 	self:MaterializeWorld()
 
-	-- Mostra stats 15GB
+	-- Mostra stats 15GB + Python + Scripting
 	self:Show15GBStats()
+	self:ShowScriptingStats()
 
 	print("========================================")
-	print("  ARKHER STUDIO FASE 1.5 READY!")
-	print("  15GB Worlds: Chunked + S3 external storage")
-	print("  Python 3.14: Transpile -> Luau + backend execution")
-	print("  IA: Ajuda em tudo - modelo, anim, terreno, script (Luau/Python)")
+	print("  ARKHER STUDIO FASE 2 READY! - SCRIPTING PRO")
+	print("  15GB Worlds: Chunked + S3 external storage - 300 chunks 50MB")
+	print("  Python 3.14: Transpile -> Luau + backend CPython + classes/async/decorators")
+	print("  Scripting Pro: Monaco Editor VS Code + Visual Blockly + SandboxVM + Debugger + Command Bar")
+	print("  IA: Ajuda em tudo - modelo, anim, terreno, script (Luau/Python/Visual)")
 	print("  Controles:")
 	print("  PC: Click coloca, W/E/R gizmo, Delete, Ctrl+Z Undo")
 	print("  Mobile: Tap coloca, Long Press radial, Toolbar inferior")
-	print("  Script: Luau, Python 3.14, Visual, AI Gen")
-	print("  Vault:", #self.vault.assets, "assets")
+	print("  Script: Luau, Python 3.14 (classes, async, match), Visual drag-drop, AI Gen")
+	print("  Editor: Line numbers, minimap, autocomplete, errors, output, command bar")
+	print("  Vault:", #self.vault.assets, "assets AAA")
 	print("  ANG:", self.ang:GetStats().message)
+	print("  Save: AutoSave 60s + Save button + 15GB chunked")
+	print("  Mata Studio X porque: Monaco + Visual + Python 3.14 + Sandbox seguro + Debugger + IA")
+	print("========================================")
+end
+
+function MainController:ShowScriptingStats()
+	local PythonAdvanced = require(ReplicatedStorage.Arkher.Scripting.PythonAdvanced)
+	print("========================================")
+	print("  SCRIPTING PRO STATS")
+	print("  Monaco: VS Code style - line numbers, minimap, autocomplete, errors")
+	print("  Visual: Blockly-like -", #self.scriptEditor.visual:GetBlocks(), "blocks - drag-drop")
+	print("  Python 3.14: Transpiler +", #self.pythonService.transpiler:GetSupportedFeatures(), "features")
+	print("  Python Advanced:", #PythonAdvanced.GetSupportedAdvancedFeatures(), "advanced features")
+	print("  SandboxVM: Secure - whitelist + blacklist + timeout 5s + 50MB")
+	print("  Debugger: Output + Command Bar + logs")
+	print("  Languages: Luau, Python 3.14, Visual, AI Gen")
 	print("========================================")
 end
 

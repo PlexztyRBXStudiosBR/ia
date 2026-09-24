@@ -1,10 +1,13 @@
 --!strict
--- Arkher Studio - Fase 1.5 - ScriptEditor - Suporta Luau, Python 3.14, Visual, AI
--- IA ajuda em todas
+-- Arkher Studio - Fase 2 - ScriptEditor Pro - Monaco + Visual + Python 3.14 + AI + Debugger + Sandbox
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LanguageSupport = require(ReplicatedStorage.Arkher.Scripting.LanguageSupport)
+local MonacoEditor = require(script.Parent.MonacoEditor)
+local VisualScripting = require(script.Parent.VisualScripting)
+local SandboxVM = require(ReplicatedStorage.Arkher.Scripting.SandboxVM)
+local Debugger = require(script.Parent.Debugger)
 local Shell = require(script.Parent.Parent.UI.Shell)
 
 local ScriptEditor = {}
@@ -13,38 +16,37 @@ ScriptEditor.__index = ScriptEditor
 function ScriptEditor.new(pythonService: any)
 	return setmetatable({
 		pythonService = pythonService,
+		sandbox = SandboxVM.new(),
 		currentLanguage = "luau" :: string,
-		currentCode = "",
 		frame = nil :: Frame?,
-		editorBox = nil :: TextBox?,
-		languageSelector = nil :: Frame?,
+		monaco = nil :: any,
+		visual = nil :: any,
+		debugger = nil :: any,
 		aiPromptBox = nil :: TextBox?,
+		editorContainer = nil :: Frame?,
 	}, ScriptEditor)
 end
 
 function ScriptEditor:Init(parent: Frame)
 	self.frame = parent
 
-	-- Header com seletor de linguagem
 	local header = Instance.new("Frame")
 	header.Name = "ScriptHeader"
 	header.Size = UDim2.new(1, 0, 0, 40)
 	header.BackgroundColor3 = Shell.Colors.panelLight
 	header.Parent = parent
 
-	-- Título
 	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(0, 150, 1, 0)
+	title.Size = UDim2.new(0, 120, 1, 0)
 	title.Position = UDim2.new(0, 10, 0, 0)
 	title.BackgroundTransparency = 1
-	title.Text = "📜 Script Editor"
+	title.Text = "📜 Script Pro"
 	title.TextColor3 = Shell.Colors.text
-	title.TextSize = 12
+	title.TextSize = 11
 	title.Font = Enum.Font.GothamBold
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = header
 
-	-- Seletor de linguagem: Luau, Python 3.14, Visual, AI
 	local languages = {
 		{ id = "luau", name = "🌙 Luau", color = Shell.Colors.accent },
 		{ id = "python", name = "🐍 Python 3.14", color = Color3.fromRGB(55, 118, 171) },
@@ -55,12 +57,12 @@ function ScriptEditor:Init(parent: Frame)
 	for i, lang in languages do
 		local btn = Instance.new("TextButton")
 		btn.Name = lang.id .. "Btn"
-		btn.Size = UDim2.new(0, 110, 0, 28)
-		btn.Position = UDim2.new(0, 160 + (i-1)*115, 0, 6)
+		btn.Size = UDim2.new(0, 90, 0, 28)
+		btn.Position = UDim2.new(0, 130 + (i-1)*95, 0, 6)
 		btn.BackgroundColor3 = lang.id == self.currentLanguage and lang.color or Shell.Colors.panel
 		btn.Text = lang.name
 		btn.TextColor3 = Shell.Colors.text
-		btn.TextSize = 10
+		btn.TextSize = 9
 		btn.Font = Enum.Font.Gotham
 		btn.Parent = header
 
@@ -70,10 +72,8 @@ function ScriptEditor:Init(parent: Frame)
 
 		btn.MouseButton1Click:Connect(function()
 			self:SetLanguage(lang.id)
-
-			-- Atualiza visual
 			for _, other in header:GetChildren() do
-				if other:IsA("TextButton") and other.Name:find("Btn") then
+				if other:IsA("TextButton") and other.Name:find("Btn") and other.Name ~= "RunBtn" then
 					other.BackgroundColor3 = Shell.Colors.panel
 				end
 			end
@@ -81,7 +81,6 @@ function ScriptEditor:Init(parent: Frame)
 		end)
 	end
 
-	-- Run button
 	local runBtn = Instance.new("TextButton")
 	runBtn.Name = "RunBtn"
 	runBtn.Size = UDim2.new(0, 60, 0, 28)
@@ -101,7 +100,6 @@ function ScriptEditor:Init(parent: Frame)
 		self:RunCode()
 	end)
 
-	-- AI Prompt (para AI Gen)
 	local aiFrame = Instance.new("Frame")
 	aiFrame.Name = "AIPromptFrame"
 	aiFrame.Size = UDim2.new(1, -20, 0, 50)
@@ -128,7 +126,7 @@ function ScriptEditor:Init(parent: Frame)
 	aiBox.Size = UDim2.new(1, -160, 0, 30)
 	aiBox.Position = UDim2.new(0, 80, 0, 10)
 	aiBox.BackgroundColor3 = Shell.Colors.panelLight
-	aiBox.PlaceholderText = "Ex: cria um sistema de moedas que gira e dá 10 coins"
+	aiBox.PlaceholderText = "Ex: cria moeda que gira e dá 10 coins (IA ajuda em Luau/Python/Visual)"
 	aiBox.Text = ""
 	aiBox.TextColor3 = Shell.Colors.text
 	aiBox.TextSize = 11
@@ -163,59 +161,45 @@ function ScriptEditor:Init(parent: Frame)
 
 	self.aiPromptBox = aiBox
 
-	-- Editor principal (TextBox multilinha)
-	local editorScroll = Instance.new("ScrollingFrame")
-	editorScroll.Name = "EditorScroll"
-	editorScroll.Size = UDim2.new(1, -20, 1, -110)
-	editorScroll.Position = UDim2.new(0, 10, 0, 110)
-	editorScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-	editorScroll.ScrollBarThickness = 6
-	editorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-	editorScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	editorScroll.Parent = parent
+	local editorContainer = Instance.new("Frame")
+	editorContainer.Name = "EditorContainer"
+	editorContainer.Size = UDim2.new(1, -20, 0.6, -20)
+	editorContainer.Position = UDim2.new(0, 10, 0, 50)
+	editorContainer.BackgroundTransparency = 1
+	editorContainer.Parent = parent
 
-	local editorBox = Instance.new("TextBox")
-	editorBox.Name = "EditorBox"
-	editorBox.Size = UDim2.new(1, -10, 1, 0)
-	editorBox.BackgroundTransparency = 1
-	editorBox.Text = self:GetDefaultCode(self.currentLanguage)
-	editorBox.TextColor3 = Shell.Colors.text
-	editorBox.TextSize = 12
-	editorBox.Font = Enum.Font.Code
-	editorBox.TextXAlignment = Enum.TextXAlignment.Left
-	editorBox.TextYAlignment = Enum.TextYAlignment.Top
-	editorBox.TextWrapped = false
-	editorBox.MultiLine = true
-	editorBox.ClearTextOnFocus = false
-	editorBox.Parent = editorScroll
+	self.editorContainer = editorContainer
 
-	self.editorBox = editorBox
-	self.currentCode = editorBox.Text
+	local monacoFrame = Instance.new("Frame")
+	monacoFrame.Name = "MonacoFrame"
+	monacoFrame.Size = UDim2.new(1, 0, 1, 0)
+	monacoFrame.BackgroundTransparency = 1
+	monacoFrame.Parent = editorContainer
 
-	editorBox:GetPropertyChangedSignal("Text"):Connect(function()
-		self.currentCode = editorBox.Text
-	end)
+	self.monaco = MonacoEditor.new(self.currentLanguage)
+	self.monaco:Init(monacoFrame, self:GetDefaultCode(self.currentLanguage))
 
-	-- Output
-	local output = Instance.new("TextLabel")
-	output.Name = "Output"
-	output.Size = UDim2.new(1, -20, 0, 60)
-	output.Position = UDim2.new(0, 10, 1, -60)
-	output.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-	output.Text = "📤 Output: Pronto para rodar..."
-	output.TextColor3 = Shell.Colors.textDim
-	output.TextSize = 10
-	output.Font = Enum.Font.Code
-	output.TextXAlignment = Enum.TextXAlignment.Left
-	output.TextYAlignment = Enum.TextYAlignment.Top
-	output.TextWrapped = true
-	output.Parent = parent
+	local visualFrame = Instance.new("Frame")
+	visualFrame.Name = "VisualFrame"
+	visualFrame.Size = UDim2.new(1, 0, 1, 0)
+	visualFrame.BackgroundTransparency = 1
+	visualFrame.Visible = false
+	visualFrame.Parent = editorContainer
 
-	local outputCorner = Instance.new("UICorner")
-	outputCorner.CornerRadius = UDim.new(0, 4)
-	outputCorner.Parent = output
+	self.visual = VisualScripting.new()
+	self.visual:Init(visualFrame)
 
-	print("[Arkher ScriptEditor] Initialized - Language:", self.currentLanguage, "- Python 3.14 supported")
+	local debuggerFrame = Instance.new("Frame")
+	debuggerFrame.Name = "DebuggerFrame"
+	debuggerFrame.Size = UDim2.new(1, -20, 0.4, -10)
+	debuggerFrame.Position = UDim2.new(0, 10, 0.6, 50)
+	debuggerFrame.BackgroundTransparency = 1
+	debuggerFrame.Parent = parent
+
+	self.debugger = Debugger.new()
+	self.debugger:Init(debuggerFrame)
+
+	print("[Arkher ScriptEditor Pro] Initialized - Monaco VS Code + Visual Blockly + Python 3.14 + Sandbox + Debugger - Fase 2")
 end
 
 function ScriptEditor:GetDefaultCode(langId: string): string
@@ -227,107 +211,138 @@ function ScriptEditor:SetLanguage(langId: string)
 	self.currentLanguage = langId
 	print("[Arkher ScriptEditor] Language ->", langId)
 
-	if self.editorBox then
-		self.editorBox.Text = self:GetDefaultCode(langId)
-		self.currentCode = self.editorBox.Text
+	if self.editorContainer then
+		local monacoFrame = self.editorContainer:FindFirstChild("MonacoFrame")
+		local visualFrame = self.editorContainer:FindFirstChild("VisualFrame")
+
+		if langId == "visual" then
+			if monacoFrame then monacoFrame.Visible = false end
+			if visualFrame then visualFrame.Visible = true end
+		else
+			if monacoFrame then monacoFrame.Visible = true end
+			if visualFrame then visualFrame.Visible = false end
+
+			if self.monaco then
+				self.monaco:SetLanguage(langId)
+				self.monaco:SetCode(self:GetDefaultCode(langId))
+			end
+		end
 	end
 
-	-- Mostra/esconde AI prompt
 	if self.frame then
 		local aiFrame = self.frame:FindFirstChild("AIPromptFrame")
 		if aiFrame then
 			aiFrame.Visible = langId == "ai"
-		end
 
-		local editorScroll = self.frame:FindFirstChild("EditorScroll")
-		if editorScroll then
-			if langId == "ai" then
-				editorScroll.Position = UDim2.new(0, 10, 0, 110)
-				editorScroll.Size = UDim2.new(1, -20, 1, -110)
-			else
-				editorScroll.Position = UDim2.new(0, 10, 0, 50)
-				editorScroll.Size = UDim2.new(1, -20, 1, -110)
+			if self.editorContainer then
+				if langId == "ai" then
+					self.editorContainer.Position = UDim2.new(0, 10, 0, 110)
+					self.editorContainer.Size = UDim2.new(1, -20, 0.6, -20)
+				else
+					self.editorContainer.Position = UDim2.new(0, 10, 0, 50)
+					self.editorContainer.Size = UDim2.new(1, -20, 0.6, -20)
+				end
 			end
 		end
 	end
 end
 
 function ScriptEditor:RunCode()
-	if not self.editorBox or not self.frame then return end
+	if not self.monaco or not self.debugger then return end
 
-	local output = self.frame:FindFirstChild("Output") :: TextLabel
-	if output then
-		output.Text = "⏳ Rodando " .. self.currentLanguage .. "..."
+	local code = ""
+
+	if self.currentLanguage == "visual" then
+		if self.visual then
+			code = self.visual:GenerateCode()
+		end
+	else
+		code = self.monaco:GetCode()
 	end
 
-	print("[Arkher ScriptEditor] Running", self.currentLanguage, "-", #self.currentCode, "bytes")
+	print("[Arkher ScriptEditor] Running", self.currentLanguage, "-", #code, "bytes")
+
+	self.debugger:Log("Rodando " .. self.currentLanguage .. " - " .. #code .. " bytes", "info", "Editor")
 
 	task.spawn(function()
-		local success, result, err
-
 		if self.currentLanguage == "luau" then
-			-- Roda Luau direto
-			local func, loadErr = loadstring(self.currentCode)
-			if not func then
-				if output then output.Text = "❌ Erro Luau: " .. tostring(loadErr) end
-				return
+			local result = self.sandbox:ExecuteWithResult(code, game.Players.LocalPlayer)
+
+			for _, log in result.logs do
+				self.debugger:Log(log, "info", "Luau")
 			end
 
-			success, result = pcall(func)
-			if success then
-				if output then output.Text = "✅ Luau executado com sucesso!" end
+			if result.success then
+				self.debugger:LogSuccess("Luau executado com sucesso!", "Luau")
 			else
-				if output then output.Text = "❌ Erro: " .. tostring(result) end
+				self.debugger:LogError(result.error or "Unknown error", "Luau")
 			end
 
 		elseif self.currentLanguage == "python" then
-			-- Transpila Python 3.14 -> Luau e roda
 			if self.pythonService then
-				local out, pyErr = self.pythonService:Execute(self.currentCode)
-				if out then
-					if output then output.Text = "✅ Python 3.14 (via Luau): " .. out end
-				else
-					if output then output.Text = "❌ Python erro: " .. tostring(pyErr) end
+				local luauCode, err = self.pythonService:TranspileLocal(code)
+
+				if not luauCode then
+					self.debugger:LogError("Transpile falhou: " .. tostring(err), "Python 3.14")
+					return
 				end
-			else
-				if output then output.Text = "❌ PythonService não inicializado" end
+
+				self.debugger:Log("Transpilado Python -> Luau - " .. #luauCode .. " bytes", "info", "Python 3.14")
+
+				local result = self.sandbox:ExecuteWithResult(luauCode, game.Players.LocalPlayer)
+
+				for _, log in result.logs do
+					self.debugger:Log(log, "info", "Python 3.14")
+				end
+
+				if result.success then
+					self.debugger:LogSuccess("Python 3.14 executado via Luau Sandbox!", "Python 3.14")
+				else
+					self.debugger:LogError(result.error or "Python error", "Python 3.14")
+				end
 			end
 
 		elseif self.currentLanguage == "visual" then
-			if output then output.Text = "🧩 Visual Scripting - Fase 2 - Blocos ainda não implementados, mas estrutura pronta" end
+			local result = self.sandbox:ExecuteWithResult(code, game.Players.LocalPlayer)
+
+			for _, log in result.logs do
+				self.debugger:Log(log, "info", "Visual")
+			end
+
+			if result.success then
+				self.debugger:LogSuccess("Visual script executado!", "Visual Blockly")
+			else
+				self.debugger:LogError(result.error or "Visual error", "Visual")
+			end
 
 		elseif self.currentLanguage == "ai" then
-			if output then output.Text = "🤖 AI Gen - Use o prompt acima e clique Gerar" end
+			self.debugger:Log("Modo AI Gen - Use prompt acima e clique Gerar", "warn", "AI")
 		end
 	end)
 end
 
 function ScriptEditor:GenerateWithAI(prompt: string)
-	if not self.editorBox or not self.frame then return end
+	if not self.monaco or not self.debugger then return end
 
-	local output = self.frame:FindFirstChild("Output") :: TextLabel
-	if output then
-		output.Text = "🤖 IA gerando código para: " .. prompt .. "..."
-	end
-
-	print("[Arkher ScriptEditor] AI Generate - Prompt:", prompt, "- Language:", self.currentLanguage)
+	self.debugger:Log("IA gerando código para: " .. prompt, "info", "AI")
 
 	task.spawn(function()
-		-- Em produção chama backend /api/ai/generate ou /api/python/generate
-
-		-- Mock: gera código baseado no prompt e linguagem atual
 		local generated = ""
+		local lowerPrompt = string.lower(prompt)
 
-		if string.find(string.lower(prompt), "moeda") or string.find(string.lower(prompt), "coin") then
+		if string.find(lowerPrompt, "moeda") or string.find(lowerPrompt, "coin") then
 			if self.currentLanguage == "python" or self.currentLanguage == "ai" then
 				generated = self.pythonService and self.pythonService:GenerateFromPrompt(prompt, "realistic") or "# Python coin system"
 			else
-				generated = [[
--- Gerado por Arkher AI - Prompt: ]] .. prompt .. [[
+				generated = string.format([[
+-- Gerado por Arkher AI - Prompt: %s
+-- IA ajuda em tudo: modelo, anim, terreno, script - Fase 2 com Sandbox seguro
+
 local coin = script.Parent
+local Players = game:GetService("Players")
 
 local function onTouch(hit)
-    local player = game.Players:GetPlayerFromCharacter(hit.Parent)
+    local player = Players:GetPlayerFromCharacter(hit.Parent)
     if player then
         local leaderstats = player:FindFirstChild("leaderstats")
         if leaderstats then
@@ -335,6 +350,9 @@ local function onTouch(hit)
             if coins then
                 coins.Value += 10
                 print("Deu 10 coins para " .. player.Name)
+                local sparkle = Instance.new("ParticleEmitter")
+                sparkle.Parent = coin
+                task.wait(0.2)
                 coin:Destroy()
             end
         end
@@ -346,25 +364,67 @@ game:GetService("RunService").Heartbeat:Connect(function(dt)
 end)
 
 coin.Touched:Connect(onTouch)
-]]
+print("Moeda criada por Arkher AI - Prompt: %s - Sandbox seguro")
+]], prompt, prompt)
 			end
+		elseif string.find(lowerPrompt, "carro") or string.find(lowerPrompt, "car") then
+			generated = [[
+-- Gerado por Arkher AI - Sistema de carro com Python 3.14 + Luau - Fase 2
+-- Prompt: ]] .. prompt .. [[
+
+from arkher import Entity, Component, World
+
+def create_car_system():
+    car = Entity.new("SportsCar")
+    car.add_component(Component.Transform(position=Vector3(0,5,0)))
+    car.add_component(Component.Render(material="Metal", color=Color3.from_rgb(255,0,0)))
+    car.add_component(Component.Physics(bodyType="dynamic", mass=1500))
+    World.current().add_entity(car)
+    print(f"Criado {car.name} com física realista!")
+
+create_car_system()
+]]
 		else
-			generated = "-- Gerado por Arkher AI para: " .. prompt .. "\nprint('Hello from AI: " .. prompt .. "')"
+			if self.currentLanguage == "python" then
+				generated = string.format([[
+# Gerado por Arkher AI - Python 3.14 - Fase 2 Sandbox
+# Prompt: %s
+
+from arkher import Entity, Component, World
+
+def main():
+    print(f"Executando: %s")
+    world = World.current()
+    print(f"Mundo tem {len(world.entities)} entidades - 15GB support")
+
+if __name__ == "__main__":
+    main()
+]], prompt, prompt)
+			else
+				generated = "-- Gerado por Arkher AI para: " .. prompt .. "\nprint('Hello from AI Fase 2: " .. prompt .. "')\n-- IA ajuda em tudo: modelo, terreno, anim, script - Sandbox seguro"
+			end
 		end
 
-		task.wait(1) -- simula IA pensando
+		task.wait(1.2)
 
-		if self.editorBox then
-			self.editorBox.Text = generated
-			self.currentCode = generated
+		if self.monaco then
+			self.monaco:SetCode(generated)
 		end
 
-		if output then
-			output.Text = "✅ IA gerou código! Clique ▶ Run para testar"
-		end
+		self.debugger:LogSuccess("IA gerou " .. #generated .. " bytes! Clique ▶ Run - Sandbox seguro", "AI")
 
-		print("[Arkher ScriptEditor] AI generated", #generated, "bytes for prompt:", prompt)
+		print("[Arkher ScriptEditor] AI generated", #generated, "bytes for:", prompt)
 	end)
+end
+
+function ScriptEditor:GetCode(): string
+	if self.currentLanguage == "visual" and self.visual then
+		return self.visual:GenerateCode()
+	elseif self.monaco then
+		return self.monaco:GetCode()
+	else
+		return ""
+	end
 end
 
 return ScriptEditor
