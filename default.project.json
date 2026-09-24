@@ -1,0 +1,62 @@
+{
+  "name": "ArkherStudio",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Arkher": {
+        "$path": "src/shared"
+      },
+      "ArkherClient": {
+        "$path": "src/client"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "ArkherServer": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "ArkherBootstrap": {
+          "$path": "src/client/init.client.luau"
+        }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FilteringEnabled": true
+      },
+      "ArkherWorld": {
+        "$className": "Folder",
+        "$properties": {
+          "Name": "ArkherWorld"
+        }
+      },
+      "ArkherTerrain": {
+        "$className": "Folder",
+        "$properties": {
+          "Name": "ArkherTerrain_Custom"
+        }
+      }
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "Future",
+        "EnvironmentDiffuseScale": 0.25,
+        "EnvironmentSpecularScale": 0.5
+      }
+    },
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": {
+        "RespectFilteringEnabled": true
+      }
+    }
+  }
+}
