@@ -281,11 +281,13 @@ function Shell.CreateContentDrawer(): Frame
 	header.BackgroundColor3 = Shell.Colors.panelLight
 	header.Parent = drawer
 
-	-- Tabs Fase 3: Vault + Toolbox + Modeler + Script Pro + AI + Project
+	-- Tabs Fase 4: Vault + Toolbox + Modeler + Animator + Terrain + Script Pro + AI + Project
 	local tabs = {
 		{ name = "💎 Vault", color = Shell.Colors.accent },
 		{ name = "🧰 Toolbox", color = Shell.Colors.panelLight },
 		{ name = "🎨 Modeler", color = Color3.fromRGB(200, 100, 255) },
+		{ name = "🎬 Animator", color = Color3.fromRGB(255, 100, 100) },
+		{ name = "🏔️ Terrain", color = Color3.fromRGB(100, 200, 100) },
 		{ name = "📜 Script Pro", color = Color3.fromRGB(55, 118, 171) },
 		{ name = "🤖 AI Gen", color = Color3.fromRGB(255, 180, 0) },
 		{ name = "📁 Project", color = Shell.Colors.panelLight },
