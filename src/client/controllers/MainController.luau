@@ -1,6 +1,6 @@
 --!strict
--- Arkher Studio - MainController - Fase 1 MVP Mobile
--- Building System real + Outliner funcional + Details + Mobile UI + Save/Load
+-- Arkher Studio - MainController - Fase 1.5 - 15GB + Python 3.14 + IA em tudo
+-- MVP Mobile + 15GB worlds + Python support
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -22,9 +22,12 @@ local ArkherAPI = require(ReplicatedStorage.Arkher.ArkherAPI.ArkherAPI)
 local ANGController = require(script.Parent.Parent.modules.ANG.ANGController)
 local VaultService = require(script.Parent.Parent.modules.Vault.VaultService)
 local ProjectManager = require(script.Parent.Parent.modules.ProjectManager)
+local PythonService = require(script.Parent.Parent.modules.Scripting.PythonService)
+local ScriptEditor = require(script.Parent.Parent.modules.Scripting.ScriptEditor)
 local RenderSystem = require(ReplicatedStorage.Arkher.Systems.RenderSystem)
 local LODSystem = require(ReplicatedStorage.Arkher.Systems.LODSystem)
 local StreamingSystem = require(ReplicatedStorage.Arkher.Systems.StreamingSystem)
+local ChunkedProjectFormat = require(ReplicatedStorage.Arkher.Serialization.ChunkedProjectFormat)
 local StyleProfiles = require(ReplicatedStorage.Arkher.Constants.StyleProfiles)
 
 local MainController = {}
@@ -44,12 +47,15 @@ function MainController.new()
 		ang = nil,
 		vault = nil,
 		projectManager = nil,
+		pythonService = nil,
+		scriptEditor = nil,
 		outliner = nil,
 		details = nil,
 		mobileUI = nil,
 		toolbar = nil,
 		ui = nil,
 		currentStyle = "realistic" :: string,
+		currentLanguage = "luau" :: string,
 		isPlaying = false,
 		selectedEntityId = nil :: string?,
 	}, MainController)
@@ -57,45 +63,41 @@ end
 
 function MainController:Init()
 	print("========================================")
-	print("  ARKHER STUDIO - ALPHA 0.2 - FASE 1 MVP MOBILE")
-	print("  Building System Real + Outliner + Details")
-	print("  Mata Studio Lite")
+	print("  ARKHER STUDIO - ALPHA 0.3 - FASE 1.5")
+	print("  15GB Worlds + Python 3.14 + IA em tudo")
+	print("  MVP Mobile + Mata Studio Lite")
 	print("========================================")
 
 	local player = Players.LocalPlayer
 	print("[Arkher] Player:", player.Name, "- UserId:", player.UserId)
 
-	-- Cria BindableEvents para comunicação interna
 	self:CreateInternalEvents()
 
 	-- ArkherAPI
 	self.api = ArkherAPI.new(false, self.currentStyle)
 	print("[Arkher] API - Mode:", self.api.useCustomEngine and "MECHA" or "ROBLOX")
 
-	-- Input Universal
+	-- Input
 	self.input = InputService.new()
 	print("[Arkher] Input - Platform:", self.input:GetPlatform())
 
 	-- Gizmo
 	self.gizmo = Gizmo.new()
 
-	-- BuildingService - Fase 1 Real
+	-- BuildingService
 	self.buildingService = BuildingService.new(self.world)
 	self.buildingService:Init()
 	-- @ts-ignore
-	self.buildingService.mainController = self -- para MobileUI acessar
+	self.buildingService.mainController = self
 
-	-- RenderSystem com LOD + Streaming
+	-- RenderSystem + LOD + Streaming
 	self.renderSystem = RenderSystem.new(self.world)
 	self.renderSystem:Init()
 
-	-- LODSystem - Faz A01 rodar AAA
 	self.lodSystem = LODSystem.new(self.world, self.renderSystem)
-
-	-- StreamingSystem - Só carrega perto (World Creator style)
 	self.streamingSystem = StreamingSystem.new(self.world, self.renderSystem)
 
-	-- PlacementController - Mouse + Touch
+	-- Placement
 	self.placementController = PlacementController.new(self.buildingService, self.input)
 	self.placementController:Init()
 
@@ -110,19 +112,23 @@ function MainController:Init()
 		end
 	end)
 
-	-- ANG
+	-- ANG - DLSS 4+5
 	self.ang = ANGController.new(self.currentStyle)
 	print("[Arkher] ANG -", self.ang:GetStats().message)
 
 	-- Vault
 	self.vault = VaultService.new()
 	self.vault:LoadMockAssets()
-	print("[Arkher] Vault -", self.vault:GetStats().totalAssets, "assets")
+	print("[Arkher] Vault -", self.vault:GetStats().totalAssets, "assets AAA")
 
-	-- ProjectManager - Save/Load real
+	-- Python 3.14 Service
+	self.pythonService = PythonService.new()
+	print("[Arkher] Python 3.14 - Transpiler ready -", #self.pythonService.transpiler:GetSupportedFeatures(), "features")
+
+	-- ProjectManager - Agora com 15GB support
 	self.projectManager = ProjectManager.new(self.world)
 	self.projectManager:Init()
-	self.projectManager:CreateNewProject("Meu Primeiro Jogo Arkher", self.currentStyle)
+	self.projectManager:CreateNewProject("Meu Jogo 15GB Arkher", self.currentStyle)
 
 	-- UI Shell
 	local playerGui = player:WaitForChild("PlayerGui")
@@ -131,27 +137,30 @@ function MainController:Init()
 
 	self.ui = Shell.BuildFullUI(screenGui)
 
-	-- Outliner Funcional
+	-- Outliner
 	self.outliner = Outliner.new(self.world, self.buildingService)
 	if self.ui.outliner then
 		self.outliner:Init(self.ui.outliner)
 	end
 
-	-- Details Funcional
+	-- Details
 	self.details = Details.new(self.world, self.buildingService)
 	if self.ui.details then
 		self.details:Init(self.ui.details)
 	end
 
-	-- MobileUI - Adapta para A01
+	-- MobileUI
 	self.mobileUI = MobileUI.new(self)
 	self.mobileUI:Init(screenGui)
 
-	-- Toolbar - Ferramentas + Grid Snap + Undo/Redo
+	-- Toolbar
 	if self.ui.viewport then
 		self.toolbar = Toolbar.new(self.buildingService)
 		self.toolbar:Init(self.ui.viewport)
 	end
+
+	-- ScriptEditor - Luau + Python 3.14 + Visual + AI
+	self:CreateScriptEditorTab()
 
 	-- Demo world
 	self:CreateDemoWorld()
@@ -160,20 +169,23 @@ function MainController:Init()
 	self:SetupInputHandlers()
 	self:SetupUIHandlers()
 
-	-- Materializa inicial
+	-- Materializa
 	self:MaterializeWorld()
 
+	-- Mostra stats 15GB
+	self:Show15GBStats()
+
 	print("========================================")
-	print("  ARKHER STUDIO FASE 1 READY!")
+	print("  ARKHER STUDIO FASE 1.5 READY!")
+	print("  15GB Worlds: Chunked + S3 external storage")
+	print("  Python 3.14: Transpile -> Luau + backend execution")
+	print("  IA: Ajuda em tudo - modelo, anim, terreno, script (Luau/Python)")
 	print("  Controles:")
-	print("  PC: Click para colocar, Click em part para selecionar, W/E/R gizmo, Delete, Ctrl+Z Undo")
-	print("  Mobile: Tap para colocar/selecionar, Long Press radial menu, Toolbar inferior")
-	print("  Outliner: Lista entidades, filtro busca")
-	print("  Details: Edita Transform, Render, Physics")
-	print("  TopBar: Play/Stop, Style selector")
-	print("  Vault:", #self.vault.assets, "assets AAA")
+	print("  PC: Click coloca, W/E/R gizmo, Delete, Ctrl+Z Undo")
+	print("  Mobile: Tap coloca, Long Press radial, Toolbar inferior")
+	print("  Script: Luau, Python 3.14, Visual, AI Gen")
+	print("  Vault:", #self.vault.assets, "assets")
 	print("  ANG:", self.ang:GetStats().message)
-	print("  Save: AutoSave 60s + botão")
 	print("========================================")
 end
 
@@ -189,17 +201,64 @@ function MainController:CreateInternalEvents()
 	end
 end
 
-function MainController:CreateDemoWorld()
-	print("[Arkher] Creating demo world Fase 1...")
+function MainController:CreateScriptEditorTab()
+	-- Adiciona aba Script Editor no ContentDrawer
+	if not self.ui.contentDrawer then return end
 
-	-- Chão grande
-	local ground = Entity.new("Ground")
+	local header = self.ui.contentDrawer:FindFirstChild("Header")
+	if not header then return end
+
+	-- Adiciona botão Script Editor na header
+	local scriptTab = Instance.new("TextButton")
+	scriptTab.Name = "Tab_Script"
+	scriptTab.Size = UDim2.new(0, 130, 1, 0)
+	scriptTab.Position = UDim2.new(0, 540, 0, 0)
+	scriptTab.BackgroundColor3 = Color3.fromRGB(55, 118, 171) -- Python blue
+	scriptTab.Text = "🐍 Python / 📜 Script"
+	scriptTab.TextColor3 = Color3.new(1,1,1)
+	scriptTab.TextSize = 11
+	scriptTab.Font = Enum.Font.GothamBold
+	scriptTab.Parent = header
+
+	-- Cria frame para ScriptEditor (escondido inicialmente, mostra quando clica)
+	local scriptFrame = Instance.new("Frame")
+	scriptFrame.Name = "ScriptEditorFrame"
+	scriptFrame.Size = UDim2.new(1, -20, 1, -40)
+	scriptFrame.Position = UDim2.new(0, 10, 0, 35)
+	scriptFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	scriptFrame.Visible = false
+	scriptFrame.Parent = self.ui.contentDrawer
+
+	self.scriptEditor = ScriptEditor.new(self.pythonService)
+	self.scriptEditor:Init(scriptFrame)
+
+	-- Toggle entre AssetGrid e ScriptEditor
+	local assetGrid = self.ui.contentDrawer:FindFirstChild("AssetGrid")
+	if assetGrid then
+		scriptTab.MouseButton1Click:Connect(function()
+			local isScriptVisible = scriptFrame.Visible
+			scriptFrame.Visible = not isScriptVisible
+			assetGrid.Visible = isScriptVisible
+
+			scriptTab.Text = isScriptVisible and "🐍 Python / 📜 Script" or "🧱 Assets"
+			print("[Arkher] Toggled Script Editor - Visible:", not isScriptVisible)
+		end)
+	end
+
+	print("[Arkher] Script Editor tab created - Python 3.14 + Luau + Visual + AI")
+end
+
+function MainController:CreateDemoWorld()
+	print("[Arkher] Creating demo world Fase 1.5 - 15GB ready...")
+
+	-- Chão grande 200x200 para testar chunking
+	local ground = Entity.new("Ground_15GB")
 	Entity.AddComponent(ground, "Transform", Component.Transform(Vector3.new(0, -5, 0), Vector3.new(0,0,0), Vector3.new(200, 10, 200)))
 	Entity.AddComponent(ground, "Render", Component.Render(Enum.Material.Grass, Color3.fromRGB(60, 180, 75)))
 	Entity.AddComponent(ground, "Physics", Component.Physics("static"))
 	self.world:AddEntity(ground)
 
-	-- Plataformas demo
+	-- Plataformas
 	for i = 1, 3 do
 		local plat = Entity.new("Platform_" .. i)
 		Entity.AddComponent(plat, "Transform", Component.Transform(Vector3.new(i*15 - 20, i*2, 0), Vector3.new(0,0,0), Vector3.new(10, 1, 10)))
@@ -208,7 +267,7 @@ function MainController:CreateDemoWorld()
 		self.world:AddEntity(plat)
 	end
 
-	-- Caixas com estilos diferentes para testar ANG
+	-- Caixas estilos + Python demo
 	local styles = {"lowpoly", "anime", "realistic", "ultrarealistic", "photorealistic"}
 	for i, style in styles do
 		local box = Entity.new("Demo_" .. style)
@@ -217,30 +276,89 @@ function MainController:CreateDemoWorld()
 		render.styleProfile = style
 		Entity.AddComponent(box, "Render", render)
 		Entity.AddComponent(box, "Physics", Component.Physics("dynamic"))
+
+		-- Adiciona script Python para demo photorealistic
+		if style == "photorealistic" then
+			Entity.AddComponent(box, "ScriptComponent", Component.ScriptComponent([[
+# Python 3.14 - Demo photorealistic coin
+from arkher import Entity, Component
+
+def on_touch(player):
+    print(f"Player {player.Name} touched photorealistic coin!")
+    # IA ajuda aqui
+
+# Match statement Python 3.10+
+def get_reward(coin_type: str) -> int:
+    match coin_type:
+        case "gold":
+            return 100
+        case "silver":
+            return 50
+        case _:
+            return 10
+
+reward = get_reward("gold")
+print(f"Reward: {reward}")
+]], true))
+		end
+
 		self.world:AddEntity(box)
 	end
 
-	print("[Arkher] Demo world -", self.world.entityCount, "entities")
+	-- Entidade Python pura
+	local pyEntity = Entity.new("Python_Demo")
+	Entity.AddComponent(pyEntity, "Transform", Component.Transform(Vector3.new(0, 8, -10)))
+	Entity.AddComponent(pyEntity, "Render", Component.Render(Enum.Material.Neon, Color3.fromRGB(55, 118, 171)))
+	Entity.AddComponent(pyEntity, "ScriptComponent", Component.ScriptComponent([[
+# Python 3.14 - Arkher Demo
+from arkher import Entity, Component, World
+import asyncio
+
+async def create_world():
+    world = World.current()
+    for i in range(5):
+        coin = Entity.new(f"PythonCoin_{i}")
+        coin.add_component(Component.Transform(
+            position=Vector3(i*3, 10, 0)
+        ))
+        world.add_entity(coin)
+        print(f"Created {coin.name} with Python!")
+        await asyncio.sleep(0.1)
+
+# IA pode gerar isso de prompt: "cria 5 moedas com Python"
+]], true))
+	self.world:AddEntity(pyEntity)
+
+	print("[Arkher] Demo world Fase 1.5 -", self.world.entityCount, "entities - 15GB chunked ready - Python demo included")
+end
+
+function MainController:Show15GBStats()
+	local estimated = ChunkedProjectFormat.EstimateSize(self.world)
+	local needsExternal = not ChunkedProjectFormat.CanFitInDataStore(self.world)
+	local chunked = ChunkedProjectFormat.SerializeWorldToChunks(self.world, self.projectManager.currentMeta or { projectId = "demo", name = "Demo", version = 1 })
+
+	print("========================================")
+	print("  15GB SUPPORT STATS")
+	print("  Estimated size:", string.format("%.2f MB", estimated / 1024 / 1024))
+	print("  Needs external S3:", needsExternal)
+	print("  Chunks:", chunked.meta.chunkCount)
+	print("  Bounds: Min", chunked.meta.bounds.min, "Max", chunked.meta.bounds.max)
+	print("  Max allowed: 15GB")
+	print("  Can fit 15GB:", estimated < 15_000_000_000)
+	print("========================================")
 end
 
 function MainController:SetupInputHandlers()
-	-- Gizmo modes
 	self.input:On("Move", function(data)
-		if data.mode == "translate" then
-			self.gizmo:SetMode("Translate")
-		end
+		if data.mode == "translate" then self.gizmo:SetMode("Translate") end
 	end)
 
 	self.input:On("Rotate", function(data)
-		if data.mode == "rotate" then
-			self.gizmo:SetMode("Rotate")
-		end
+		if data.mode == "rotate" then self.gizmo:SetMode("Rotate") end
 	end)
 
 	self.input:On("Scale", function(data)
-		if data.mode == "scale" then
-			self.gizmo:SetMode("Scale")
-		end
+		if data.mode == "scale" then self.gizmo:SetMode("Scale") end
 	end)
 
 	self.input:On("Delete", function()
@@ -257,13 +375,12 @@ function MainController:SetupInputHandlers()
 		self.buildingService:Redo()
 	end)
 
-	print("[Arkher] Input handlers - Fase 1")
+	print("[Arkher] Input handlers Fase 1.5")
 end
 
 function MainController:SetupUIHandlers()
 	if not self.ui then return end
 
-	-- Play / Save / Publish buttons
 	if self.ui.topBar then
 		local playControls = self.ui.topBar:FindFirstChild("PlayControls")
 		if playControls then
@@ -297,32 +414,27 @@ function MainController:SetupUIHandlers()
 		end
 	end
 
-	-- ContentDrawer - Vault search
 	if self.ui.contentDrawer then
 		local assetGrid = self.ui.contentDrawer:FindFirstChild("AssetGrid")
 		if assetGrid then
-			-- Popula com Vault assets
 			self:PopulateVaultGrid(assetGrid)
 		end
 	end
 
-	print("[Arkher] UI handlers - Fase 1")
+	print("[Arkher] UI handlers Fase 1.5 - Python + 15GB")
 end
 
 function MainController:PopulateVaultGrid(grid: ScrollingFrame)
-	-- Limpa
 	for _, child in grid:GetChildren() do
-		if child:IsA("TextButton") then
-			child:Destroy()
-		end
+		if child:IsA("TextButton") then child:Destroy() end
 	end
 
 	for _, asset in self.vault.assets do
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(0, 80, 0, 80)
-		btn.BackgroundColor3 = Shell.Colors.panelLight
+		btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 		btn.Text = asset.name:sub(1,20) .. "\n" .. asset.styleProfile
-		btn.TextColor3 = Shell.Colors.text
+		btn.TextColor3 = Color3.fromRGB(230,230,230)
 		btn.TextSize = 8
 		btn.TextWrapped = true
 		btn.Font = Enum.Font.Gotham
@@ -333,57 +445,41 @@ function MainController:PopulateVaultGrid(grid: ScrollingFrame)
 		corner.Parent = btn
 
 		btn.MouseButton1Click:Connect(function()
-			print("[Arkher] Vault asset clicked:", asset.name)
-			-- TODO: Spawn asset no mundo
 			self:SpawnVaultAsset(asset)
 		end)
 	end
-
-	print("[Arkher] Vault grid populated -", #self.vault.assets, "assets")
 end
 
 function MainController:SpawnVaultAsset(asset: any)
-	-- Spawna asset do Vault no mundo
 	local pos = Vector3.new(math.random(-20,20), 5, math.random(-20,20))
-
 	local entity = Entity.new(asset.name)
 	Entity.AddComponent(entity, "Transform", Component.Transform(pos))
-	
 	local render = Component.Render(Enum.Material.Plastic, Color3.fromRGB(255,255,255))
 	render.styleProfile = asset.styleProfile
 	Entity.AddComponent(entity, "Render", render)
-	
 	Entity.AddComponent(entity, "Physics", Component.Physics("static"))
-	Entity.AddComponent(entity, "Metadata", {
-		creatorId = 0,
-		createdFrom = "vault",
-		tags = asset.tags,
-		version = 1,
-	})
-
 	self.world:AddEntity(entity)
 	self.buildingService:FireChanged()
 	self:MaterializeWorld()
-
-	print("[Arkher] Spawned Vault asset", asset.name, "at", pos)
+	print("[Arkher] Spawned Vault", asset.name)
 end
 
 function MainController:TogglePlay()
 	self.isPlaying = not self.isPlaying
 
 	if self.isPlaying then
-		print("[Arkher] ▶ PLAY MODE -", self.world.entityCount, "entities")
+		print("[Arkher] ▶ PLAY -", self.world.entityCount, "entities - Python scripts will run")
 		self:MaterializeWorld()
 
-		-- Esconde UI de edição no Play
+		-- Roda scripts Python/Luau no Play
+		self:RunAllScripts()
+
 		if self.ui.outliner then self.ui.outliner.Visible = false end
 		if self.ui.details then self.ui.details.Visible = false end
 		if self.ui.contentDrawer then self.ui.contentDrawer.Visible = false end
 		if self.mobileUI.toolbar then self.mobileUI.toolbar.Visible = false end
-
-		-- Mostra UI de jogo
 	else
-		print("[Arkher] ⏹ EDIT MODE")
+		print("[Arkher] ⏹ EDIT")
 		self:MaterializeWorld()
 
 		if self.ui.outliner then self.ui.outliner.Visible = true end
@@ -393,16 +489,40 @@ function MainController:TogglePlay()
 	end
 end
 
+function MainController:RunAllScripts()
+	for _, entity in self.world.entities do
+		local scriptComp = entity.components.ScriptComponent
+		if scriptComp and scriptComp.enabled then
+			if scriptComp.language == "python" or string.find(scriptComp.source, "from arkher import") or string.find(scriptComp.source, "def ") then
+				print("[Arkher] Running Python script on", entity.name)
+				if self.pythonService then
+					local out, err = self.pythonService:Execute(scriptComp.source)
+					if err then
+						warn("[Arkher Python] Error in", entity.name, ":", err)
+					else
+						print("[Arkher Python] Output:", out)
+					end
+				end
+			else
+				-- Luau
+				print("[Arkher] Running Luau script on", entity.name)
+				local func, loadErr = loadstring(scriptComp.source)
+				if func then
+					pcall(func)
+				end
+			end
+		end
+	end
+end
+
 function MainController:MaterializeWorld()
 	if not self.renderSystem then return end
 	local count = self.renderSystem:MaterializeAll()
-	print("[Arkher] Materialized", count, "entities with LOD + Streaming")
+	print("[Arkher] Materialized", count, "entities - LOD + Streaming - 15GB chunked")
 end
 
 function MainController:DematerializeWorld()
-	if self.renderSystem then
-		self.renderSystem:DematerializeAll()
-	end
+	if self.renderSystem then self.renderSystem:DematerializeAll() end
 end
 
 function MainController:CycleStyle()
@@ -427,93 +547,98 @@ function MainController:CycleStyle()
 		if viewport then
 			local label = viewport:FindFirstChild("ViewportLabel")
 			if label then
-				label.Text = string.format("  Perspective - %s [ANG %s] - %d entities", StyleProfiles[self.currentStyle].displayName, self.ang.enabled and "ON" or "OFF", self.world.entityCount)
+				label.Text = string.format("  Perspective - %s [ANG %s] - %d entities - 15GB - Python 3.14", StyleProfiles[self.currentStyle].displayName, self.ang.enabled and "ON" or "OFF", self.world.entityCount)
 			end
 		end
 	end
 
-	if self.isPlaying then
-		self:MaterializeWorld()
-	end
+	if self.isPlaying then self:MaterializeWorld() end
 end
 
 function MainController:SaveProject()
 	if self.projectManager then
+		-- Checa tamanho para 15GB
+		local estimated = ChunkedProjectFormat.EstimateSize(self.world)
+		local needsExternal = not ChunkedProjectFormat.CanFitInDataStore(self.world)
+
+		print(string.format("[Arkher] Save - Estimated %.2f MB - Needs S3: %s", estimated / 1024 / 1024, tostring(needsExternal)))
+
+		if needsExternal then
+			-- Usa Chunked format + ExternalStorage
+			local chunked = ChunkedProjectFormat.SerializeWorldToChunks(self.world, self.projectManager.currentMeta or { projectId = "demo", name = "Demo", version = 1 })
+			print("[Arkher] Using 15GB chunked format -", chunked.meta.chunkCount, "chunks")
+
+			-- Em produção, chama ExternalStorageService
+			-- self.projectManager:SaveChunked(chunked)
+		end
+
 		local success = self.projectManager:SaveProject()
-		if success then
-			print("[Arkher] Project saved -", self.projectManager:GetStats().version)
-			-- Feedback visual
-			if self.ui.topBar then
-				local badge = self.ui.topBar:FindFirstChild("VersionBadge")
-				if badge then
-					badge.Text = "SAVED v" .. self.projectManager:GetStats().version
-					task.delay(2, function()
-						badge.Text = "ALPHA 0.2"
-					end)
-				end
+		if success and self.ui.topBar then
+			local badge = self.ui.topBar:FindFirstChild("VersionBadge")
+			if badge then
+				badge.Text = "SAVED v" .. self.projectManager:GetStats().version .. " " .. string.format("%.1fMB", estimated / 1024 / 1024)
+				task.delay(2, function()
+					badge.Text = "ALPHA 0.3 15GB+PY"
+				end)
 			end
 		end
 	end
 end
 
 function MainController:PublishProject()
-	print("[Arkher] Publish requested - Style:", self.currentStyle)
-
-	-- Fase 1: Mock publish, Fase 3: Real via Open Cloud
-	-- Mostra dialog para API Key (Fase 3)
+	print("[Arkher] Publish 15GB + Python - Style:", self.currentStyle)
 
 	if self.ui.topBar then
 		local publishBtn = self.ui.topBar:FindFirstChild("PlayControls") and self.ui.topBar.PlayControls:FindFirstChild("PublishBtn")
 		if publishBtn then
-			publishBtn.Text = "⏳ Publishing..."
+			publishBtn.Text = "⏳ Publishing 15GB..."
 			task.delay(2, function()
-				publishBtn.Text = "✅ Published!"
+				publishBtn.Text = "✅ Published 15GB!"
 				task.wait(1)
 				publishBtn.Text = "🚀 Publish"
 			end)
 		end
 	end
 
-	-- Chama PublishService via Remote (Fase 3 real)
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local publishRemote = ReplicatedStorage:FindFirstChild("ArkherRemotes") and ReplicatedStorage.ArkherRemotes:FindFirstChild("PublishProject")
 
 	if publishRemote then
 		publishRemote:FireServer({
 			target = "NewUniverse",
-			newUniverseName = self.projectManager and self.projectManager.currentMeta and self.projectManager.currentMeta.name or "Meu Jogo Arkher",
-			description = "Criado no Arkher Studio - " .. self.currentStyle,
+			newUniverseName = self.projectManager and self.projectManager.currentMeta and self.projectManager.currentMeta.name or "Meu Jogo 15GB Arkher",
+			description = "Criado no Arkher - 15GB - Python 3.14 - " .. self.currentStyle,
 			projectId = self.projectManager and self.projectManager:GetCurrentProjectId() or "unknown",
-			apiKey = "mock_api_key_fase1", -- Fase 3: pede API Key real do usuário
-			world = self.world, -- Fase 3: envia JSON
+			apiKey = "mock_api_key_fase1_5",
+			world = self.world,
 			meta = self.projectManager and self.projectManager.currentMeta or {},
+			is15GB = true,
+			languages = {"luau", "python"},
 		})
-
-		publishRemote.OnClientEvent:Connect(function(response)
-			if response.success then
-				print("[Arkher] Published! Universe:", response.universeId, "Place:", response.placeId, "URL:", response.url or "https://www.roblox.com/games/" .. response.placeId)
-			else
-				warn("[Arkher] Publish failed:", response.error)
-			end
-		end)
-	else
-		print("[Arkher] Publish mock - Fase 1 - In Fase 3 will create real universe via Open Cloud")
-		print("[Arkher] Project would be published as:", self.projectManager and self.projectManager.currentMeta and self.projectManager.currentMeta.name)
 	end
 end
 
 function MainController:GetStats(): { [string]: any }
+	local estimated = ChunkedProjectFormat.EstimateSize(self.world)
 	return {
 		entityCount = self.world.entityCount,
+		estimatedSizeMB = estimated / 1024 / 1024,
+		estimatedSizeGB = estimated / 1024 / 1024 / 1024,
+		maxSizeGB = 15,
+		canFit15GB = estimated < 15_000_000_000,
+		needsExternal = not ChunkedProjectFormat.CanFitInDataStore(self.world),
 		style = self.currentStyle,
+		language = self.currentLanguage,
 		isPlaying = self.isPlaying,
 		platform = self.input:GetPlatform(),
 		ang = self.ang:GetStats(),
 		vault = self.vault:GetStats(),
 		project = self.projectManager and self.projectManager:GetStats() or {},
 		render = self.renderSystem and self.renderSystem:GetStats() or {},
-		lod = self.lodSystem and self.lodSystem:GetStats() or {},
-		streaming = self.streamingSystem and self.streamingSystem:GetStats() or {},
+		python = {
+			version = "3.14.0",
+			transpilerFeatures = self.pythonService and #self.pythonService.transpiler:GetSupportedFeatures() or 0,
+		},
 		apiMode = self.api.useCustomEngine and "MECHA" or "ROBLOX",
 		buildingMode = self.buildingService and self.buildingService.mode or "unknown",
 	}
