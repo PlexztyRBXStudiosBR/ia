@@ -54,25 +54,45 @@ print("[Arkher Server] Remotes created")
 
 -- Handlers
 
-saveRemote.OnServerEvent:Connect(function(player, projectId, worldData, meta)
-	print(string.format("[Arkher Server] Save request from %s (%d) - Project %s", player.Name, player.UserId, projectId))
+saveRemote.OnServerEvent:Connect(function(player, projectId, jsonData, meta)
+	print(string.format("[Arkher Server] Save request from %s (%d) - Project %s - %d bytes", player.Name, player.UserId, projectId, jsonData and #jsonData or 0))
 
-	-- TODO: Desserializar worldData e salvar via ProjectService
-	-- Por enquanto log
-
-	local success = true -- projectService:SaveProject(player.UserId, projectId, world, meta)
+	-- Fase 1: Recebe JSON direto do client e salva com chunking
+	local success = false
+	if jsonData and typeof(jsonData) == "string" then
+		success = projectService:SaveJson(player.UserId, projectId, jsonData, meta)
+	else
+		warn("[Arkher Server] Invalid save data - expected JSON string")
+	end
 
 	if success then
-		print("[Arkher Server] Project saved")
+		print("[Arkher Server] Project saved - Version", meta and meta.version or "?")
+		saveRemote:FireClient(player, { success = true, projectId = projectId, version = meta and meta.version or 0 })
 	else
-		warn("[Arkher Server] Failed to save project")
+		warn("[Arkher Server] Failed to save project", projectId)
+		saveRemote:FireClient(player, { success = false, error = "Save failed" })
 	end
 end)
 
 loadRemote.OnServerInvoke = function(player, projectId)
 	print(string.format("[Arkher Server] Load request from %s - Project %s", player.Name, projectId))
-	local world, meta = projectService:LoadProject(player.UserId, projectId)
-	return world, meta
+	
+	-- Retorna JSON para client desserializar
+	local metaKey = string.format("%d_%s_meta", player.UserId, projectId)
+	local meta: any = nil
+	
+	-- Tenta pegar do cache/dataStore via ProjectService
+	local world, loadedMeta = projectService:LoadProject(player.UserId, projectId)
+	
+	if world then
+		-- Serializa de volta para JSON para enviar ao client
+		local ProjectFormat = require(game.ReplicatedStorage.Arkher.Serialization.ProjectFormat)
+		local json = ProjectFormat.Serialize(world, loadedMeta)
+		return json, loadedMeta
+	else
+		warn("[Arkher Server] Project not found for load:", projectId)
+		return nil, nil
+	end
 end
 
 publishRemote.OnServerEvent:Connect(function(player, request)

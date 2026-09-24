@@ -35,6 +35,10 @@ end
 
 function ProjectService:SaveProject(userId: number, projectId: string, world: World.World, meta: any): boolean
 	local json = ProjectFormat.Serialize(world, meta)
+	return self:SaveJson(userId, projectId, json, meta)
+end
+
+function ProjectService:SaveJson(userId: number, projectId: string, json: string, meta: any): boolean
 	local chunks = ProjectFormat.Chunk(json)
 
 	print(string.format("[Arkher ProjectService] Saving project %s - %d bytes in %d chunks", projectId, #json, #chunks))

@@ -106,15 +106,30 @@ function Shell.CreateTopBar(): Frame
 	-- Play controls (centro)
 	local playContainer = Instance.new("Frame")
 	playContainer.Name = "PlayControls"
-	playContainer.Size = UDim2.new(0, 200, 1, 0)
-	playContainer.Position = UDim2.new(0.5, -100, 0, 0)
+	playContainer.Size = UDim2.new(0, 280, 1, 0)
+	playContainer.Position = UDim2.new(0.5, -140, 0, 0)
 	playContainer.BackgroundTransparency = 1
 	playContainer.Parent = topBar
+
+	local saveBtn = Instance.new("TextButton")
+	saveBtn.Name = "SaveBtn"
+	saveBtn.Size = UDim2.new(0, 60, 0, 28)
+	saveBtn.Position = UDim2.new(0, 0, 0.5, -14)
+	saveBtn.BackgroundColor3 = Shell.Colors.panelLight
+	saveBtn.Text = "💾 Save"
+	saveBtn.TextColor3 = Shell.Colors.text
+	saveBtn.TextSize = 11
+	saveBtn.Font = Enum.Font.Gotham
+	saveBtn.Parent = playContainer
+
+	local saveCorner = Instance.new("UICorner")
+	saveCorner.CornerRadius = UDim.new(0, 6)
+	saveCorner.Parent = saveBtn
 
 	local playBtn = Instance.new("TextButton")
 	playBtn.Name = "PlayBtn"
 	playBtn.Size = UDim2.new(0, 80, 0, 28)
-	playBtn.Position = UDim2.new(0, 0, 0.5, -14)
+	playBtn.Position = UDim2.new(0, 70, 0.5, -14)
 	playBtn.BackgroundColor3 = Shell.Colors.success
 	playBtn.Text = "▶ PLAY"
 	playBtn.TextColor3 = Color3.new(1,1,1)
@@ -125,6 +140,21 @@ function Shell.CreateTopBar(): Frame
 	local playCorner = Instance.new("UICorner")
 	playCorner.CornerRadius = UDim.new(0, 6)
 	playCorner.Parent = playBtn
+
+	local publishBtn = Instance.new("TextButton")
+	publishBtn.Name = "PublishBtn"
+	publishBtn.Size = UDim2.new(0, 80, 0, 28)
+	publishBtn.Position = UDim2.new(0, 160, 0.5, -14)
+	publishBtn.BackgroundColor3 = Shell.Colors.accent
+	publishBtn.Text = "🚀 Publish"
+	publishBtn.TextColor3 = Color3.new(1,1,1)
+	publishBtn.TextSize = 11
+	publishBtn.Font = Enum.Font.GothamBold
+	publishBtn.Parent = playContainer
+
+	local publishCorner = Instance.new("UICorner")
+	publishCorner.CornerRadius = UDim.new(0, 6)
+	publishCorner.Parent = publishBtn
 
 	-- Style selector (direita)
 	local styleSelector = Instance.new("TextButton")
