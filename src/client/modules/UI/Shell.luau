@@ -272,8 +272,8 @@ function Shell.CreateDetailsPanel(): Frame
 end
 
 function Shell.CreateContentDrawer(): Frame
-	-- Content Drawer = Toolbox + Vault + Content Browser, estilo Unreal
-	local drawer = Shell.CreatePanel("ContentDrawer", UDim2.new(1, -600, 0, 200), UDim2.new(0, 290, 1, -210))
+	-- Content Drawer = Toolbox + Vault + Modeling + Script Pro + AI, estilo Unreal - Fase 3
+	local drawer = Shell.CreatePanel("ContentDrawer", UDim2.new(1, -600, 0, 240), UDim2.new(0, 290, 1, -250))
 
 	local header = Instance.new("Frame")
 	header.Name = "Header"
@@ -281,22 +281,48 @@ function Shell.CreateContentDrawer(): Frame
 	header.BackgroundColor3 = Shell.Colors.panelLight
 	header.Parent = drawer
 
-	-- Tabs: Vault (nosso) + Roblox Toolbox + Project
-	local tabs = {"💎 Arkher Vault", "🧰 Roblox Toolbox", "📁 Project", "🤖 AI Generator"}
-	for i, tabName in tabs do
-		local tab = Instance.new("TextButton")
-		tab.Name = "Tab_" .. i
-		tab.Size = UDim2.new(0, 130, 1, 0)
-		tab.Position = UDim2.new(0, (i-1)*135, 0, 0)
-		tab.BackgroundColor3 = i == 1 and Shell.Colors.accent or Shell.Colors.panelLight
-		tab.Text = tabName
-		tab.TextColor3 = Shell.Colors.text
-		tab.TextSize = 11
-		tab.Font = Enum.Font.Gotham
-		tab.Parent = header
+	-- Tabs Fase 3: Vault + Toolbox + Modeler + Script Pro + AI + Project
+	local tabs = {
+		{ name = "💎 Vault", color = Shell.Colors.accent },
+		{ name = "🧰 Toolbox", color = Shell.Colors.panelLight },
+		{ name = "🎨 Modeler", color = Color3.fromRGB(200, 100, 255) },
+		{ name = "📜 Script Pro", color = Color3.fromRGB(55, 118, 171) },
+		{ name = "🤖 AI Gen", color = Color3.fromRGB(255, 180, 0) },
+		{ name = "📁 Project", color = Shell.Colors.panelLight },
+	}
+
+	local headerScroll = Instance.new("ScrollingFrame")
+	headerScroll.Name = "HeaderScroll"
+	headerScroll.Size = UDim2.new(1, 0, 1, 0)
+	headerScroll.BackgroundTransparency = 1
+	headerScroll.ScrollBarThickness = 0
+	headerScroll.CanvasSize = UDim2.new(0, #tabs*110, 0, 0)
+	headerScroll.Parent = header
+
+	local headerLayout = Instance.new("UIListLayout")
+	headerLayout.FillDirection = Enum.FillDirection.Horizontal
+	headerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	headerLayout.Padding = UDim.new(0, 5)
+	headerLayout.Parent = headerScroll
+
+	for i, tab in tabs do
+		local tabBtn = Instance.new("TextButton")
+		tabBtn.Name = "Tab_" .. tab.name
+		tabBtn.Size = UDim2.new(0, 100, 1, 0)
+		tabBtn.BackgroundColor3 = i == 1 and tab.color or Shell.Colors.panelLight
+		tabBtn.Text = tab.name
+		tabBtn.TextColor3 = Shell.Colors.text
+		tabBtn.TextSize = 10
+		tabBtn.Font = Enum.Font.Gotham
+		tabBtn.LayoutOrder = i
+		tabBtn.Parent = headerScroll
+
+		local tabCorner = Instance.new("UICorner")
+		tabCorner.CornerRadius = UDim.new(0, 4)
+		tabCorner.Parent = tabBtn
 	end
 
-	-- Grid de assets
+	-- Grid de assets (default)
 	local grid = Instance.new("ScrollingFrame")
 	grid.Name = "AssetGrid"
 	grid.Size = UDim2.new(1, -20, 1, -40)
