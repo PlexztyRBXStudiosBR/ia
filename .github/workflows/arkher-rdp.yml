@@ -1,0 +1,222 @@
+name: Arkher AI - RDP Workspace (Windows 16GB EPYC)
+
+on:
+  workflow_dispatch:
+    inputs:
+      instalar_blender:
+        description: 'Instalar Blender 3.6 LTS (obrigatório para geração 3D)'
+        type: boolean
+        default: true
+      instalar_roblox_studio:
+        description: 'Instalar Roblox Studio'
+        type: boolean
+        default: true
+      instalar_godot:
+        description: 'Instalar Godot 4.3'
+        type: boolean
+        default: true
+      instalar_rojo:
+        description: 'Instalar Rojo/Aftman (toolchain Roblox)'
+        type: boolean
+        default: true
+      usar_tailscale:
+        description: 'Usar Tailscale (precisa do secret TAILSCALE_AUTH_KEY)'
+        type: boolean
+        default: false
+
+jobs:
+  arkher-rdp:
+    runs-on: windows-latest      # Windows Server 2022 - 16GB RAM / AMD EPYC
+    timeout-minutes: 350         # ~5h50
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ============ 0. Info da máquina ============
+      - name: Info da máquina
+        shell: pwsh
+        run: |
+          Write-Host "=== Arkher AI - Windows RDP ==="
+          Write-Host "CPU: $((Get-CimInstance Win32_Processor).Name)"
+          Write-Host "RAM: $([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1)) GB"
+          Write-Host "Disco livre C: $([math]::Round((Get-PSDrive C).Free/1GB,1)) GB"
+          python --version
+          git --version
+
+      # ============ 1. Liberar RDP e firewall ============
+      - name: Liberar RDP (porta 3389)
+        shell: pwsh
+        run: |
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' UserAuthentication 0 -Force
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' SecurityLayer 0 -Force
+          foreach ($r in @('RDP-TS','ARKHER-RDP')) { netsh advfirewall firewall delete rule name=$r 2>$null | Out-Null }
+          netsh advfirewall firewall add rule name="RDP-TS" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service TermService -Force
+
+      # ============ 2. Criar usuário RDP ============
+      - name: Criar usuário do RDP
+        id: rdpuser
+        shell: pwsh
+        run: |
+          $cs=@{U=[char[]](65..90);L=[char[]](97..122);N=[char[]](48..57)}
+          $r=@(); $r+=$cs.U|Get-Random -Count 5; $r+=$cs.L|Get-Random -Count 5; $r+=$cs.N|Get-Random -Count 4
+          $pw=-join ($r|Sort-Object{Get-Random})
+          $sec=ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name "arkher" -Password $sec -AccountNeverExpires -ErrorAction SilentlyContinue | Out-Null
+          Add-LocalGroupMember -Group "Administrators" -Member "arkher" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "arkher" -ErrorAction SilentlyContinue
+          # Auto-logon para sessão gráfica
+          $k='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+          Set-ItemProperty $k AutoAdminLogon 1 -Force
+          Set-ItemProperty $k DefaultUserName "arkher" -Force
+          Set-ItemProperty $k DefaultPassword $pw -Force
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          echo "RDP_USER=arkher" >> $env:GITHUB_OUTPUT
+          echo "RDP_PW=$pw" >> $env:GITHUB_OUTPUT
+          Write-Host "Usuario RDP: arkher"
+
+      # ============ 3. Chocolatey + Blender + FFmpeg + Git + 7zip ============
+      - name: Instalar Chocolatey + Blender + FFmpeg + Git
+        if: inputs.instalar_blender
+        timeout-minutes: 25
+        shell: pwsh
+        run: |
+          # Instalar Chocolatey se não existir
+          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          choco install -y blender ffmpeg git 7zip --no-progress --limit-output
+          # Blender pro PATH (choco já faz isso, mas garante)
+          $blenderExe = Get-ChildItem "C:\Program Files\Blender Foundation" -Recurse -Filter blender.exe | Select-Object -First 1
+          if ($blenderExe) {
+            $blenderDir = $blenderExe.Directory.FullName
+            $env:Path += ";$blenderDir"
+            [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")
+            Write-Host "Blender em: $($blenderExe.FullName)"
+          }
+          refreshenv
+          blender --version | Select-Object -First 1
+          ffmpeg -version | Select-Object -First 1
+
+      # ============ 4. Roblox Studio ============
+      - name: Instalar Roblox Studio
+        if: inputs.instalar_roblox_studio
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          try {
+            Invoke-WebRequest "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+              -OutFile "$env:TEMP\studio.exe" -UseBasicParsing
+            Start-Process "$env:TEMP\studio.exe" -ArgumentList "/S"
+            $fim=(Get-Date).AddMinutes(6)
+            do { Start-Sleep 10
+                 $exe=Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxStudioBeta.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            } while (-not $exe -and (Get-Date) -lt $fim)
+            if ($exe) { Write-Host "Roblox Studio instalado: $($exe.FullName)" }
+            Get-Process RobloxStudio* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          } catch { Write-Host "Falha instalando Studio: $_" }
+
+      # ============ 5. Godot 4.3 ============
+      - name: Instalar Godot 4.3
+        if: inputs.instalar_godot
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools\bin | Out-Null
+          $url = "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip"
+          Invoke-WebRequest -Uri $url -OutFile godot.zip -UseBasicParsing
+          Expand-Archive godot.zip -DestinationPath tools\bin -Force
+          Remove-Item godot.zip
+          $godotExe = Get-ChildItem tools\bin -Filter "Godot*.exe" | Select-Object -First 1
+          if ($godotExe) {
+            Rename-Item $godotExe.FullName "godot.exe"
+            $env:Path += ";$(Get-Location)\tools\bin"
+            [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")
+            Write-Host "Godot instalado: $(Get-Location)\tools\bin\godot.exe"
+          }
+
+      # ============ 6. Rojo / Aftman (Roblox) ============
+      - name: Instalar Rojo (Aftman)
+        if: inputs.instalar_rojo
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools\bin | Out-Null
+          $aftmanUrl = "https://github.com/LPGhatguy/aftman/releases/latest/download/aftman-windows-x86_64.zip"
+          Invoke-WebRequest -Uri $aftmanUrl -OutFile aftman.zip -UseBasicParsing
+          Expand-Archive aftman.zip -DestinationPath tools\bin -Force
+          Remove-Item aftman.zip
+          $env:Path += ";$(Get-Location)\tools\bin;$HOME\.aftman\bin"
+          tools\bin\aftman self-install --no-modify-path
+          tools\bin\aftman install rojo-rbx/rojo@7.4.4
+          rojo --version
+          Write-Host "Rojo instalado"
+
+      # ============ 7. Python + dependências da Arkher AI ============
+      - name: Instalar dependências Python da Arkher AI
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip --quiet --disable-pip-version-check
+          python -m pip install numpy scipy networkx trimesh pillow pydantic aiofiles --quiet --disable-pip-version-check
+          Write-Host "Dependências Python OK"
+          # Testar a Arkher AI
+          python main.py check-tools
+
+      # ============ 8. Tailscale VPN (opcional) ============
+      - name: Tailscale VPN
+        if: inputs.usar_tailscale
+        timeout-minutes: 5
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        shell: pwsh
+        run: |
+          if (-not $env:TS_KEY) { Write-Host "Sem TAILSCALE_AUTH_KEY — pule o Tailscale e use o SSH/tmate abaixo"; return }
+          $p="$env:TEMP\ts.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $p -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i","`"$p`"","/quiet","/norestart" -Wait
+          Remove-Item $p -Force
+          $ts="$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $ts up --authkey=$env:TS_KEY --hostname=arkher-ai --accept-dns=false
+          $ip=$null;$n=0
+          while(-not $ip -and $n -lt 24){ Start-Sleep 5; $ip=(& $ts ip -4 2>$null | Select-Object -First 1); $n++ }
+          if($ip){ $ip=$ip.Trim(); echo "TS_IP=$ip" >> $env:GITHUB_ENV; Write-Host "Tailscale IP: $ip" }
+
+      # ============ COMO ACESSAR ============
+      - name: COMO ACESSAR
+        shell: pwsh
+        env:
+          USUARIO: ${{ steps.rdpuser.outputs.RDP_USER }}
+          SENHA: ${{ steps.rdpuser.outputs.RDP_PW }}
+        run: |
+          Write-Host ""
+          Write-Host "=============== ARKHER AI PRONTA ==============="
+          Write-Host "Usuario RDP:  $env:USUARIO"
+          Write-Host "Senha RDP:    $env:SENHA"
+          if ($env:TS_IP) {
+            Write-Host "IP Tailscale: $env:TS_IP  (conecte por RDP neste IP)"
+          } else {
+            Write-Host "Conecte por RDP usando o IP do runner (Actions logs)"
+            Write-Host "Ou use a sessao SSH/tmate que abre no proximo passo"
+          }
+          Write-Host ""
+          Write-Host "Dentro da RDP (PowerShell):"
+          Write-Host "  cd gameforge_ai   (ou pasta da Arkher AI)"
+          Write-Host "  python main.py check-tools"
+          Write-Host "  python main.py gerar-modelo `"Cavaleiro`" --tipo hero --engine godot --rig"
+          Write-Host "================================================"
+          Write-Host ""
+
+      # ============ 9. Sessão SSH/tmate para entrar direto no runner ============
+      - name: Abrir sessao SSH/tmate (conecte por aqui se nao usar Tailscale)
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 340
+        with:
+          connect-to-ssh: true
+          sudo: false
+          limit-access-to-actor: true

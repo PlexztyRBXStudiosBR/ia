@@ -1,0 +1,6 @@
+*.pyc
+__pycache__/
+.venv/
+test_output/
+workspace/
+projects/
