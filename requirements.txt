@@ -1,0 +1,22 @@
+# GameForge AI Dependências
+python >= 3.10
+
+# Processamento 3D
+numpy>=1.24.0
+trimesh>=4.0.0
+pillow>=10.0.0
+opencv-python>=4.8.0
+
+# IA e ML
+torch>=2.1.0
+diffusers>=0.25.0
+transformers>=4.36.0
+open3d>=0.18.0
+
+# Async e utilitários
+aiofiles>=23.0.0
+pydantic>=2.5.0
+
+# Godot e Roblox ferramentas
+# godot_parser (opcional para manipular .tscn)
+# rojo (integração Roblox, instalado via foreman)
