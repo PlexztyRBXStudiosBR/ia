@@ -14,6 +14,35 @@ python server.py                 # http://localhost:8000
 python server.py --port 9000     # porta customizada
 ```
 
+> ⚠️ Os comandos acima precisam ser executados **dentro da pasta do projeto**
+> (onde o `server.py` está). Se aparecer
+> `can't open file '.../server.py': No such file or directory`, você está no
+> diretório errado: faça `cd` até a pasta do repositório antes
+> (ou clone, como mostrado em §1.1).
+
+### 1.1 Rodar no Termux (celular Android, sem PC)
+
+O servidor é Python puro, então roda direto no Termux:
+
+```bash
+pkg update -y && pkg install -y python git
+git clone -b arena/01a0eb31-ia https://github.com/PlexztyRBXStudiosBR/ia.git arkher
+cd arkher
+python server.py
+```
+
+Depois abra **http://localhost:8000** no navegador do próprio celular.
+Comandos opcionais úteis no Termux:
+
+```bash
+pkg install -y python-numpy    # libera texturas até 16k (reinicie o servidor depois)
+termux-wake-lock               # impede o Android de suspender o servidor em 2º plano
+```
+
+> Após o merge do PR #3, o clone funciona sem `-b ...` (branch padrão `main`).
+> Dica: não cole comandos com formatação de markdown (`[texto](link)`) no
+> terminal — copie apenas o texto simples dentro dos blocos de código.
+
 Opcional, mas recomendado para texturas 8k/16k rápidas:
 
 ```bash
