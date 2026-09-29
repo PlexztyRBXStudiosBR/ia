@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="Arkher AI — estúdio de game dev com IA: projetos Godot e Roblox, modelos 3D, texturas PBR e animações.">
+<title>Arkher AI — Estúdio de Game Dev</title>
+<link rel="icon" href="icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="app">
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <img src="icon.png" alt="Arkher AI" class="brand-icon">
+      <div class="brand-text">
+        <strong>Arkher AI</strong>
+        <span>estúdio de game dev</span>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-tab="chat" title="Converse com os 9 especialistas">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/></svg>
+        <span>Chat com o time</span>
+      </button>
+      <button class="nav-btn" data-tab="godot" title="Projeto Godot 4 completo">
+        <svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5zm0 3.3 6.5 3.6L12 12.5 5.5 8.9 12 5.3z"/></svg>
+        <span>Projeto Godot</span>
+      </button>
+      <button class="nav-btn" data-tab="roblox" title="Projeto Roblox (Rojo + Luau)">
+        <svg viewBox="0 0 24 24"><path d="M5 3h14l2 18-9-4-9 4L5 3z"/></svg>
+        <span>Projeto Roblox</span>
+      </button>
+      <button class="nav-btn" data-tab="model" title="Modelos 3D .glb com LODs e rig">
+        <svg viewBox="0 0 24 24"><path d="M12 2 2 8v8l10 6 10-6V8L12 2zm0 2.6L19 8l-7 4-7-4 7-3.4zM4 9.7l7 4v6.6l-7-4.2V9.7zm16 0v6.4l-7 4.2v-6.6l7-4z"/></svg>
+        <span>Modelo 3D</span>
+      </button>
+      <button class="nav-btn" data-tab="textures" title="Texturas PBR 512 → 16k">
+        <svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>
+        <span>Texturas PBR</span>
+      </button>
+      <button class="nav-btn" data-tab="animation" title="Rig + animações + export Roblox">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2"/><path d="M12 7v6m0 0-4 7m4-7 4 7M6 10h12"/></svg>
+        <span>Animações</span>
+      </button>
+      <button class="nav-btn" data-tab="code" title="Biblioteca de código AAA">
+        <svg viewBox="0 0 24 24"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>
+        <span>Código</span>
+      </button>
+      <button class="nav-btn" data-tab="about" title="O que é real, o que é roadmap">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v6"/></svg>
+        <span>Sobre / honestidade</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="conn" id="connBadge" title="Status do servidor de geração">
+        <span class="dot"></span><span id="connText">conectando…</span>
+      </div>
+      <button class="ghost-btn" id="btnSettings">⚙ Servidor</button>
+    </div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-toggle" id="menuToggle" aria-label="menu">☰</button>
+      <h1 id="pageTitle">Chat com o time</h1>
+      <div class="topbar-right">
+        <span class="pill" id="numpyPill" title="Backend com numpy gera texturas grandes muito mais rápido">backend</span>
+      </div>
+    </header>
+
+    <!-- ---------- CHAT ---------- -->
+    <section class="view active" id="view-chat">
+      <div class="chat-wrap">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-side">
+          <h3>Os 9 especialistas</h3>
+          <div id="agentsList" class="agents-list"></div>
+          <div class="hint-box">
+            <strong>Dica:</strong> pergunte <em>"como faço save no Godot?"</em>,
+            <em>"como bloqueo exploit de dano no Roblox?"</em> ou peça
+            <em>"cria um projeto de terror"</em>.
+          </div>
+        </div>
+        <form class="chat-input" id="chatForm">
+          <textarea id="chatText" rows="1" placeholder="Fale com o time Arkher… (Enter envia, Shift+Enter quebra linha)"></textarea>
+          <button class="primary-btn" type="submit" id="chatSend">Enviar ➤</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ---------- GODOT ---------- -->
+    <section class="view" id="view-godot">
+      <div class="grid2">
+        <div class="card form-card">
+          <h2>Novo projeto Godot 4.3</h2>
+          <p class="muted">Cenas, scripts, HUD, menu, lighting e shaders — validados no formato de cena do Godot 4. Abre com F5.</p>
+          <label>Nome do jogo<input id="gName" value="Lâmina de Aether" maxlength="60"></label>
+          <label>Descrição<input id="gDesc" value="Aventura de ação em terceira pessoa com combate corpo-a-corpo" maxlength="200"></label>
+          <label>Gênero
+            <select id="gGenre">
+              <option value="acao">Ação</option><option value="aventura">Aventura</option>
+              <option value="rpg">RPG</option><option value="terror">Terror</option>
+              <option value="plataforma">Plataforma</option><option value="corrida">Corrida</option>
+              <option value="estrategia">Estratégia</option><option value="simulacao">Simulação</option>
+            </select>
+          </label>
+          <fieldset class="checks">
+            <legend>Módulos</legend>
+            <label class="chk"><input type="checkbox" value="player" checked> Player controller</label>
+            <label class="chk"><input type="checkbox" value="enemy" checked> Inimigos com IA</label>
+            <label class="chk"><input type="checkbox" value="hud" checked> HUD + pausa</label>
+            <label class="chk"><input type="checkbox" value="menu" checked> Menu principal</label>
+            <label class="chk"><input type="checkbox" value="save" checked> Save/Load</label>
+            <label class="chk"><input type="checkbox" value="shaders" checked> Shaders (água, vento…)</label>
+            <label class="chk"><input type="checkbox" value="lighting" checked> Lighting cinematográfico</label>
+          </fieldset>
+          <button class="primary-btn big" id="gGenerate">⚡ Gerar projeto Godot</button>
+          <div class="progress" id="gProgress" hidden><div class="bar"></div><span id="gProgressText"></span></div>
+        </div>
+        <div class="card result-card" id="gResult">
+          <div class="empty-state">O projeto aparece aqui: árvore de arquivos, validação e download do .zip.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- ROBLOX ---------- -->
+    <section class="view" id="view-roblox">
+      <div class="grid2">
+        <div class="card form-card">
+          <h2>Novo projeto Roblox (Rojo 7)</h2>
+          <p class="muted">Luau server-authoritative com anti-exploit, DataStore robusto, HUD e arena. Sincroniza ao vivo com <code>rojo serve</code>.</p>
+          <label>Nome do jogo<input id="rName" value="Aether Arena" maxlength="60"></label>
+          <label>Descrição<input id="rDesc" value="Arena PvPvE com progressão, loja e kill feed" maxlength="200"></label>
+          <label>Gênero
+            <select id="rGenre">
+              <option value="acao">Ação / arena</option><option value="obby">Obby</option>
+              <option value="simulador">Simulador</option><option value="rpg">RPG</option>
+              <option value="terror">Terror</option>
+            </select>
+          </label>
+          <div class="info-box">🔐 Tudo que o cliente envia é desconfiado por padrão: dano, moedas e compras são validados no servidor.</div>
+          <button class="primary-btn big" id="rGenerate">⚡ Gerar projeto Roblox</button>
+          <div class="progress" id="rProgress" hidden><div class="bar"></div><span id="rProgressText"></span></div>
+        </div>
+        <div class="card result-card" id="rResult">
+          <div class="empty-state">A árvore Rojo + scripts aparecem aqui, com o passo a passo de conexão no README.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- MODELO 3D ---------- -->
+    <section class="view" id="view-model">
+      <div class="grid2">
+        <div class="card form-card">
+          <h2>Modelo 3D (.glb)</h2>
+          <p class="muted">Malha com normais + UVs + material PBR, LODs por decimação e, para personagens, rig de 22 ossos com animações.</p>
+          <label>Tipo
+            <select id="mType">
+              <option value="hero">Herói / personagem</option>
+              <option value="creature">Criatura / inimigo</option>
+              <option value="npc">NPC</option>
+              <option value="tree">Árvore</option>
+              <option value="rock">Pedra</option>
+              <option value="sword">Espada / arma</option>
+              <option value="house">Casa</option>
+              <option value="prop">Prop (barril…)</option>
+              <option value="terrain">Terreno</option>
+              <option value="sphere">Esfera</option>
+              <option value="cube">Cubo</option>
+            </select>
+          </label>
+          <label>Nome<input id="mName" value="Cavaleiro de Aether" maxlength="40"></label>
+          <label>Detalhe (polígonos): <output id="mDetailOut">2</output>
+            <input type="range" id="mDetail" min="1" max="4" step="1" value="2">
+          </label>
+          <label>Material base
+            <select id="mMaterial"></select>
+          </label>
+          <label class="chk"><input type="checkbox" id="mLods" checked> Gerar LODs (LOD0–LOD3)</label>
+          <label class="chk" id="mRigRow"><input type="checkbox" id="mRig" checked> Com rig + animações (personagens)</label>
+          <div class="chips" id="mAnims"></div>
+          <button class="primary-btn big" id="mGenerate">⚡ Gerar modelo</button>
+          <div class="progress" id="mProgress" hidden><div class="bar"></div><span id="mProgressText"></span></div>
+        </div>
+        <div class="card result-card" id="mResult">
+          <div class="empty-state">Preview 3D interativo (gire com o mouse) + estatísticas + downloads.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- TEXTURAS ---------- -->
+    <section class="view" id="view-textures">
+      <div class="card">
+        <h2>Texturas PBR procedurais</h2>
+        <p class="muted">Seamless, com albedo / normal / roughness / metallic / AO / height. De 512 px a 16k (16k = 268 megapixels por mapa).</p>
+        <div class="tex-controls">
+          <label>Resolução
+            <select id="tRes">
+              <option value="512">512 px</option><option value="1k">1k</option>
+              <option value="2k" selected>2k</option><option value="4k">4k</option>
+              <option value="8k">8k</option><option value="16k">16k</option>
+            </select>
+          </label>
+          <label>Seed<input id="tSeed" type="number" value="1337" style="width:110px"></label>
+          <label class="chk"><input type="checkbox" id="tTile" checked> Seamless (tileável)</label>
+          <button class="primary-btn" id="tGenerate">⚡ Gerar mapas</button>
+          <span class="muted" id="tEta"></span>
+        </div>
+        <div class="mat-grid" id="matGrid"></div>
+        <div class="progress" id="tProgress" hidden><div class="bar"></div><span id="tProgressText"></span></div>
+        <div class="tex-preview" id="tPreview"></div>
+      </div>
+    </section>
+
+    <!-- ---------- ANIMAÇÕES ---------- -->
+    <section class="view" id="view-animation">
+      <div class="grid2">
+        <div class="card form-card">
+          <h2>Rig + animações</h2>
+          <p class="muted">Esqueleto humanóide de 22 ossos, skinning automático e takes keyframeados. Exporta .glb (Godot/Blender), AnimationLibrary (.tres) e KeyframeSequence R15 (.rbxlx) para o Roblox.</p>
+          <div class="chips" id="aAnims"></div>
+          <label>FPS de amostragem
+            <select id="aFps"><option>30</option><option selected>60</option></select>
+          </label>
+          <label>Detalhe do mesh<input type="range" id="aDetail" min="1" max="4" value="2"></label>
+          <button class="primary-btn big" id="aGenerate">⚡ Gerar rig + animações</button>
+          <div class="progress" id="aProgress" hidden><div class="bar"></div><span id="aProgressText"></span></div>
+        </div>
+        <div class="card result-card" id="aResult">
+          <div class="empty-state">Resumo dos takes (duração, frames, ossos animados) + downloads por engine.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- CÓDIGO ---------- -->
+    <section class="view" id="view-code">
+      <div class="code-toolbar">
+        <input id="codeSearch" placeholder="Buscar snippet… (ex: save, exploit, shader, pool)">
+        <div class="chips" id="codeEngines">
+          <button class="chip active" data-engine="">todos</button>
+          <button class="chip" data-engine="godot">Godot</button>
+          <button class="chip" data-engine="roblox">Roblox</button>
+        </div>
+      </div>
+      <div class="code-list" id="codeList"></div>
+    </section>
+
+    <!-- ---------- SOBRE ---------- -->
+    <section class="view" id="view-about">
+      <div class="card about">
+        <h2>O que o Arkher AI faz <em>de verdade</em> hoje</h2>
+        <table class="matrix">
+          <thead><tr><th>Capacidade</th><th>Status</th><th>Como</th></tr></thead>
+          <tbody>
+            <tr><td>Projeto Godot 4 completo (cenas, scripts, HUD, lighting)</td><td class="ok">✔ REAL</td><td>Gerador próprio, validado no formato .tscn 3</td></tr>
+            <tr><td>Projeto Roblox (Rojo + Luau server-authoritative)</td><td class="ok">✔ REAL</td><td>default.project.json + serviços anti-exploit</td></tr>
+            <tr><td>Modelos .glb com UVs, normais, material PBR e LODs</td><td class="ok">✔ REAL</td><td>Writer glTF 2.0 em Python puro</td></tr>
+            <tr><td>Rig humanóide + animações (idle/walk/run/jump/ataque…)</td><td class="ok">✔ REAL</td><td>Skinning automático + keyframes procedurais</td></tr>
+            <tr><td>Texturas PBR seamless 512 → 16k (6 canais)</td><td class="ok">✔ REAL</td><td>19 receitas procedurais (numpy opcional)</td></tr>
+            <tr><td>Export de animação p/ Roblox (.rbxlx R15)</td><td class="ok">✔ REAL</td><td>KeyframeSequence com CFrames por pose</td></tr>
+            <tr><td>App Android (APK)</td><td class="ok">✔ REAL</td><td>Capacitor WebView + modo offline; build via GitHub Actions</td></tr>
+            <tr><td>Modelos esculturais de personagem (estátua, rosto…)</td><td class="warn">◐ PARCIAL</td><td>Procedural por primitivas; escultura artística precisa de DCC/IA de mesh</td></tr>
+            <tr><td>Texturas autorais específicas (logo, tatuagem, rosto)</td><td class="warn">◐ PARCIAL</td><td>Conector de API de imagem opcional (chave do usuário)</td></tr>
+            <tr><td>Animação com qualidade de mo-cap de estúdio</td><td class="warn">◐ PARCIAL</td><td>Base procedural sólida; polimento manual recomendado</td></tr>
+            <tr><td>"Jogo AAA completo sozinho em dias"</td><td class="no">✘ MITO</td><td>Nenhuma IA faz isso hoje. O Arkher acelera o pipeline real de produção.</td></tr>
+          </tbody>
+        </table>
+        <h2>Arquitetura</h2>
+        <pre class="arch">site (web/)  ──HTTP──▶  server.py (stdlib)  ──▶  backend/arkher/
+   │                                                ├─ godot_project.py   (.tscn/.gd/.tres)
+   │                                                ├─ roblox_project.py  (Rojo/Luau)
+   │                                                ├─ glb.py             (glTF 2.0 binário)
+   │                                                ├─ animation.py       (rig + takes + R15)
+   │                                                ├─ textures.py        (PBR procedural)
+   │                                                └─ meshes.py          (primitivas + LODs)
+   └── APK (Capacitor WebView) ── mesmo site, com geradores JS offline</pre>
+        <h2>App Android</h2>
+        <p>O APK empacota este site num WebView. Ele funciona em <strong>dois modos</strong>:</p>
+        <ul>
+          <li><strong>Conectado:</strong> aponta para o servidor no seu PC/RDP (<code>http://SEU_IP:8000</code>) e usa a geração completa em Python.</li>
+          <li><strong>Offline:</strong> geradores em JavaScript rodam no próprio aparelho (projetos, modelos simples, texturas até 2k) — sem servidor.</li>
+        </ul>
+        <p>O build do APK é feito pelo GitHub Actions (<code>.github/workflows/build-apk.yml</code>): abra a aba <em>Actions → Arkher APK</em> no repositório e rode o workflow; o artefato <code>arkher-ai.apk</code> fica disponível para baixar e instalar.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- modal de configuração do servidor -->
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card">
+    <h3>Servidor de geração</h3>
+    <p class="muted">No navegador, deixe vazio para usar o mesmo host do site. No APK, informe o endereço do seu PC/RDP na rede (ex.: <code>http://192.168.0.20:8000</code>).</p>
+    <input id="serverUrl" placeholder="http://192.168.0.20:8000 (vazio = automático)">
+    <div class="modal-actions">
+      <button class="ghost-btn" id="settingsOffline">Usar modo offline (geradores no aparelho)</button>
+      <button class="primary-btn" id="settingsSave">Salvar e testar</button>
+    </div>
+    <div class="muted" id="settingsMsg"></div>
+  </div>
+</div>
+
+<script src="offline.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

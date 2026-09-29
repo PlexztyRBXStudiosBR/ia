@@ -3,6 +3,30 @@
 > 🚀 IA multi-agente especializada em **Godot e Roblox**, capaz de criar jogos completos nível AAA.
 > Roda numa RDP Windows de **16 GB RAM / AMD EPYC** via GitHub Actions, com Blender 3.6 LTS, Godot 4.3, Roblox Studio e Rojo automaticamente instalados.
 
+## 🌐 Site + App Android (novo!)
+
+Além da CLI/RDP, o Arkher agora tem um **estúdio web** e um **APK**:
+
+```bash
+python server.py          # abre http://localhost:8000 (só Python 3.10+, zero dependências)
+```
+
+No site você conversa com os 9 especialistas e gera, de verdade:
+
+* **Projeto Godot 4.3 completo** (.zip que abre no editor: cenas, scripts, HUD, menu, lighting, shaders, GDD) — validado no formato `.tscn` 3
+* **Projeto Roblox** (Rojo 7 + Luau server-authoritative com anti-exploit, DataStore e HUD)
+* **Modelos `.glb`** com UVs/normais/material PBR e LODs — personagens saem **rigged** (22 ossos) com animações
+* **Texturas PBR seamless** 512 px → 16k (albedo/normal/roughness/metallic/AO/height, 19 materiais)
+* **Animações** exportadas para Godot (`.tres`) e Roblox (KeyframeSequence R15 `.rbxlx`)
+
+O **APK Android** empacota o mesmo site num WebView com modo offline (geradores JS
+no aparelho). O build é feito pelo GitHub Actions: **Actions → "Arkher APK (Android)" → Run workflow**
+e baixe o artefato `arkher-ai-apk`. Detalhes completos em [`docs/SITE_E_APK.md`](docs/SITE_E_APK.md).
+
+> ⚖️ **Honestidade técnica:** o Arkher entrega *assets e código reais e importáveis*
+> (procedurais), não "jogo AAA pronto por mágica". Veja a matriz de capacidades em
+> `docs/SITE_E_APK.md` §6 e na aba **Sobre** do site.
+
 ## 🎮 Como subir a RDP e usar
 
 1. No GitHub, abra **Actions → "Arkher AI - RDP Workspace" → Run workflow**

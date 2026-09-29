@@ -1,0 +1,42 @@
+name: CI — geradores Arkher
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "server.py"
+      - "tests/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "server.py"
+      - "tests/**"
+
+jobs:
+  test:
+    name: Testes dos geradores (Python puro + numpy)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        deps: ["pure", "numpy"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar numpy
+        if: matrix.deps == 'numpy'
+        run: pip install numpy
+      - name: Rodar testes
+        run: python3 tests/test_generators.py
+      - name: Smoke test do servidor
+        run: |
+          python3 server.py --port 8123 &
+          sleep 2
+          curl -sf http://localhost:8123/api/status | grep -q '"godot_project": true'
+          curl -sf -X POST http://localhost:8123/api/generate/project -d '{"engine":"godot","name":"CI"}' | grep -q asset_id
+          curl -sf -X POST http://localhost:8123/api/generate/project -d '{"engine":"roblox","name":"CI"}' | grep -q asset_id
+          curl -sf -X POST http://localhost:8123/api/generate/model -d '{"type":"hero","rig":true}' | grep -q asset_id
+          kill %1

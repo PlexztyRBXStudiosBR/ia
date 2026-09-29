@@ -1,0 +1,8 @@
+{
+  "appId": "br.com.arkher.ai",
+  "appName": "Arkher AI",
+  "webDir": "../web",
+  "android": {
+    "allowMixedContent": true
+  }
+}
