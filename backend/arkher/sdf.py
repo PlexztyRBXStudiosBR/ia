@@ -73,88 +73,89 @@ class SDF:
 
     # -------------------------------------------------- avaliação
     def _prim(self, op: dict, p) -> object:
-        """Distância de um ponto (ou array Nx3) até a primitiva."""
+        """Distância de um ponto (tuple) ou de um array Nx3 (numpy) à primitiva.
+
+        Toda a aritmética é escrita para funcionar igual com escalares Python e
+        com arrays numpy — sem `if valor:` (ambíguo para arrays)."""
         kind = op["kind"]
-        if HAS_NUMPY and isinstance(p, np.ndarray):
+        arr = HAS_NUMPY and isinstance(p, np.ndarray)
+        if arr:
             x, y, z = p[:, 0], p[:, 1], p[:, 2]
+            _max, _min = np.maximum, np.minimum
+            _sqrt, _abs, _clip = np.sqrt, np.abs, np.clip
         else:
             x, y, z = p[0], p[1], p[2]
+            _max, _min = max, min
+            _sqrt, _abs = math.sqrt, abs
+            def _clip(v, lo, hi):
+                return max(lo, min(hi, v))
 
         def dist(ax, ay, az, bx, by, bz):
-            return ((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2) ** 0.5
+            return _sqrt((ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2)
 
         if kind == "sphere":
             c, r = op["c"], op["r"]
             return dist(x, y, z, c[0], c[1], c[2]) - r
+
         if kind == "ellipsoid":
             c, r = op["c"], op["r"]
             qx = (x - c[0]) / r[0]
             qy = (y - c[1]) / r[1]
             qz = (z - c[2]) / r[2]
-            q = (qx * qx + qy * qy + qz * qz) ** 0.5
-            # aproximação padrão de elipsóide SDF
-            k0 = (qx * qx + qy * qy + qz * qz) ** 0.5
-            k1 = ((qx / r[0]) ** 2 + (qy / r[1]) ** 2 + (qz / r[2]) ** 2) ** 0.5
-            return (k0 * (k0 - 1.0)) / (k1 if k1 > 1e-9 else 1e-9)
+            k0 = _sqrt(qx * qx + qy * qy + qz * qz)
+            k1 = _sqrt((qx / r[0]) ** 2 + (qy / r[1]) ** 2 + (qz / r[2]) ** 2)
+            if arr:
+                k1s = np.where(k1 > 1e-9, k1, 1e-9)
+            else:
+                k1s = k1 if k1 > 1e-9 else 1e-9
+            return (k0 * (k0 - 1.0)) / k1s
+
         if kind == "capsule":
             a, b, r = op["a"], op["b"], op["r"]
             abx, aby, abz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
             apx, apy, apz = x - a[0], y - a[1], z - a[2]
-            denom = abx * abx + aby * aby + abz * abz
-            t = (apx * abx + apy * aby + apz * abz) / denom
-            t = t if not HAS_NUMPY or isinstance(t, float) else np.clip(t, 0.0, 1.0)
-            if not HAS_NUMPY or isinstance(t, float):
-                t = max(0.0, min(1.0, t))
+            denom = (abx * abx + aby * aby + abz * abz) or 1e-9
+            t = _clip((apx * abx + apy * aby + apz * abz) / denom, 0.0, 1.0)
             dx = apx - abx * t
             dy = apy - aby * t
             dz = apz - abz * t
-            return (dx * dx + dy * dy + dz * dz) ** 0.5 - r
+            return _sqrt(dx * dx + dy * dy + dz * dz) - r
+
         if kind == "box":
             c, h, rr = op["c"], op["h"], op["rr"]
-            qx = (x - c[0]) if not HAS_NUMPY or isinstance(x, float) else np.abs(x - c[0])
-            qy = (y - c[1]) if not HAS_NUMPY or isinstance(y, float) else np.abs(y - c[1])
-            qz = (z - c[2]) if not HAS_NUMPY or isinstance(z, float) else np.abs(z - c[2])
-            if HAS_NUMPY and isinstance(p, np.ndarray):
-                qx, qy, qz = np.abs(x - c[0]), np.abs(y - c[1]), np.abs(z - c[2])
-            else:
-                qx, qy, qz = abs(x - c[0]), abs(y - c[1]), abs(z - c[2])
-            ex = qx - h[0]
-            ey = qy - h[1]
-            ez = qz - h[2]
-            if HAS_NUMPY and isinstance(ex, np.ndarray):
-                outside = np.sqrt(np.maximum(ex, 0) ** 2 + np.maximum(ey, 0) ** 2 + np.maximum(ez, 0) ** 2)
-                inside = np.minimum(np.maximum(ex, np.maximum(ey, ez)), 0.0)
-                return outside + inside - rr
-            mx = max(ex, 0.0)
-            my = max(ey, 0.0)
-            mz = max(ez, 0.0)
-            return math.sqrt(mx * mx + my * my + mz * mz) + min(max(ex, max(ey, ez)), 0.0) - rr
+            qx, qy, qz = _abs(x - c[0]), _abs(y - c[1]), _abs(z - c[2])
+            ex, ey, ez = qx - h[0], qy - h[1], qz - h[2]
+            outside = _sqrt(_max(ex, 0) ** 2 + _max(ey, 0) ** 2 + _max(ez, 0) ** 2)
+            inside = _min(_max(ex, _max(ey, ez)), 0.0)
+            return outside + inside - rr
+
         if kind == "torus":
             c, R, r, axis = op["c"], op["R"], op["r"], op["axis"]
             if axis == "y":
-                qx = ((x - c[0]) ** 2 + (z - c[2]) ** 2) ** 0.5 - R
+                qx = _sqrt((x - c[0]) ** 2 + (z - c[2]) ** 2) - R
                 qy = y - c[1]
             elif axis == "x":
-                qx = ((y - c[1]) ** 2 + (z - c[2]) ** 2) ** 0.5 - R
+                qx = _sqrt((y - c[1]) ** 2 + (z - c[2]) ** 2) - R
                 qy = x - c[0]
             else:
-                qx = ((x - c[0]) ** 2 + (y - c[1]) ** 2) ** 0.5 - R
+                qx = _sqrt((x - c[0]) ** 2 + (y - c[1]) ** 2) - R
                 qy = z - c[2]
-            return (qx * qx + qy * qy) ** 0.5 - r
+            return _sqrt(qx * qx + qy * qy) - r
+
         if kind == "cone":
             a, b, r1, r2 = op["a"], op["b"], op["r1"], op["r2"]
             abx, aby, abz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
             L = math.sqrt(abx * abx + aby * aby + abz * abz) or 1.0
             ux, uy, uz = abx / L, aby / L, abz / L
             apx, apy, apz = x - a[0], y - a[1], z - a[2]
-            t = apx * ux + apy * uy + apz * uz
-            t = max(0.0, min(L, t)) if not (HAS_NUMPY and isinstance(t, np.ndarray)) else np.clip(t, 0.0, L)
+            t = _clip(apx * ux + apy * uy + apz * uz, 0.0, L)
             dx = apx - ux * t
             dy = apy - uy * t
             dz = apz - uz * t
-            radial = (dx * dx + dy * dy + dz * dz) ** 0.5
+            radial = _sqrt(dx * dx + dy * dy + dz * dz)
             r_at = r1 + (r2 - r1) * (t / L)
             return (radial - r_at) * 0.9
+
         raise ValueError(kind)
 
     def eval_points(self, p) -> object:
