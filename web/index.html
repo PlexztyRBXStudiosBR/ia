@@ -207,6 +207,7 @@
           </label>
           <label class="chk"><input type="checkbox" id="mLods" checked> Gerar LODs (LOD0–LOD3)</label>
           <label class="chk" id="mRigRow"><input type="checkbox" id="mRig" checked> Com rig + animações (personagens)</label>
+          <label class="chk" title="Voxel Remesh + Decimate + Smart UV + shade smooth no Blender de verdade (só malha estática; remesh destruiria o rig)"><input type="checkbox" id="mRefineBlender"> 🔧 Refinar no Blender (Remesh + Smart UV + smooth) — <span id="mBlenderState" class="muted">verificando…</span></label>
           <div class="chips" id="mAnims"></div>
           <button class="primary-btn big" id="mGenerate">⚡ Gerar modelo</button>
           <div class="progress" id="mProgress" hidden><div class="bar"></div><span id="mProgressText"></span></div>
@@ -298,6 +299,7 @@
             <tr><td>App Android (APK)</td><td class="ok">✔ REAL</td><td>Capacitor WebView + modo offline; build via GitHub Actions</td></tr>
             <tr><td>Malhas orgânicas por texto (escultura SDF + surface nets)</td><td class="ok">✔ REAL</td><td>Escultura paramétrica offline — humanóide/criatura/rocha/busto com músculos, espinhos, semente</td></tr>
             <tr><td>Texto/imagem → 3D por IA generativa (Meshy/Tripo/local)</td><td class="warn">◐ PARCIAL</td><td>Real COM chave de API configurada; sem chave, a imagem vira relevo 3D real e o texto vira escultura SDF</td></tr>
+            <tr><td>Kernel de geometria Blender nativo (Voxel Remesh + Smart UV + Decimate + smooth)</td><td class="warn">◐ OPCIONAL</td><td>Real onde o Blender existe (RDP/PC via <code>ARKHER_BLENDER</code> ou <code>pip install bpy</code>); no celular cai no SDF puro. Só malha estática (remesh destrói rig)</td></tr>
             <tr><td>Mo-cap de estúdio (importar .bvh e retargetar)</td><td class="ok">✔ REAL</td><td>Parser BVH + FK + IK de 2 ossos no rig de 22 ossos; dados reais de Mixamo/CMU/Blender</td></tr>
             <tr><td>PBR derivado da SUA foto (albedo/normal/roughness/AO/height)</td><td class="ok">✔ REAL</td><td>Até 2k sem numpy, até 16k com numpy; ampliação além do original usa micro-detalhe procedural (honesto: não cria informação que não existe)</td></tr>
             <tr><td>Animação procedural com acabamento "mo-cap"</td><td class="warn">◐ PARCIAL</td><td>Slerp + follow-through em cascata; ótima para protótipo — para qualidade final, importe mo-cap real (.bvh)</td></tr>
@@ -313,6 +315,7 @@
    │                                                ├─ textures.py        (PBR procedural)
    │                                                ├─ meshes.py          (primitivas + LODs)
    │                                                ├─ sdf.py             (escultura SDF + surface nets)
+   │                                                ├─ blender_bridge.py  (kernel Blender nativo opcional)
    │                                                ├─ bvh.py             (mo-cap: parse + retarget IK)
    │                                                ├─ mesh_ai.py         (Meshy/Tripo/local + relevo)
    │                                                └─ image_pbr.py       (foto → conjunto PBR)

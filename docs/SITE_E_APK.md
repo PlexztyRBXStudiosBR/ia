@@ -87,6 +87,31 @@ devolve `{"glb_b64": ...}` ou bytes `.glb` — use para plugar TripoSR / Hunyuan
 Stable Fast 3D num PC com GPU. `GET /api/status` reporta quais provedores estão
 ativos; a UI mostra o estado real e nunca finge geração neural onde não há.
 
+### Blender como kernel de geometria nativo (opcional)
+
+O Arkher esculpe em Python puro (`sdf.py`). Se o **Blender** estiver instalado na
+máquina do servidor, a ponte `blender_bridge.py` leva a malha para o Blender de
+verdade e aplica o pipeline de produção — **Voxel Remesh → Decimate → Smart UV
+Project → shade smooth → GLB** — resultando em topologia limpa, UVs sem
+sobreposição e normais corretas.
+
+```bash
+export ARKHER_BLENDER=/caminho/para/blender      # executável (Linux/macOS/Windows)
+# ou apenas deixe o `blender` no PATH
+# ou: pip install bpy                              # Blender como módulo Python
+```
+
+* No **RDP do GitHub Actions** o workflow já instala o Blender (Chocolatey) e o põe
+  no PATH — o servidor Arkher detecta sozinho (`GET /api/status` → `blender_kernel`).
+* No **celular (Termux)** não há Blender: a ponte reporta `available:false` e o
+  Arkher entrega a malha SDF pura. **Honesto:** nunca finge ter refinado no Blender.
+* O refino é **só para malha estática**: Voxel Remesh destrói skinning, então se o
+  modelo sair com rig o refino é pulado (com aviso). Para refinar, desmarque o rig.
+* Na UI: aba **Modelo 3D** → “🔧 Refinar no Blender” (o estado ao lado mostra se o
+  Blender foi detectado no servidor).
+
+> Por que Godot/Roblox Studio/Rojo não são “kernel de mesh”? Ver §7.
+
 ### Geração assíncrona (jobs) — por que não dá "failed to fetch"
 
 Escultura SDF, mo-cap e texturas 4k+ podem levar dezenas de segundos. Num celular
@@ -226,3 +251,26 @@ que entrega *assets e código reais e importáveis*:
   resolução original adiciona micro-detalhe procedural — não cria informação mágica.
 * “Jogo AAA completo em dias por IA”: não existe hoje. O que existe — e é o que o
   Arkher faz — é encurtar semanas de setup/produção para horas.
+
+---
+
+## 7. Por que “IA de mesh com Blender/Godot/Roblox Studio/Rojo nativos” é diferente do que parece
+
+Pergunta comum: *“por que não fazer nossa própria IA de mesh usando Blender, Godot,
+Roblox Studio e Rojo nativos?”* A resposta honesta, ferramenta por ferramenta:
+
+| Ferramenta | O que ela É | Dá pra usar como “IA de mesh”? | Como o Arkher integra (nativo) |
+|---|---|---|---|
+| **Meshy / Tripo** | Serviço **neural** texto/imagem→3D (modelo treinado + GPU na nuvem) | **Sim — é exatamente isso** | Conector opcional (`MESHY_API_KEY`/`TRIPO_API_KEY`). Sem chave, não existe: não se “treina” um Meshy local sem dataset+GPU |
+| **Blender** | DCC (modelagem/escultura). Tem API Python (`bpy`) e modo headless | **Não é IA**, mas é um **kernel de geometria real** | ✅ **Ponte nativa** (`blender_bridge.py`): Remesh/Decimate/Smart UV/smooth. Roda onde há Blender (RDP/PC), cai no SDF puro no celular |
+| **Godot** | **Engine**/runtime (renderiza e roda o jogo) | Não — engine não gera malha de personagem | ✅ Já geramos `.tscn`/`.tres`/`project.godot`/`.glb` que o Godot **abre nativamente** (validados no formato 4) |
+| **Roblox Studio** | Editor **GUI só-Windows**, **sem modo headless** | Não dá pra automatizar num servidor/celular | O caminho nativo é via **Rojo** + `.rbxlx`, não controlar o Studio |
+| **Rojo** | Sincronizador de arquivos → Studio | Não é gerador de mesh | ✅ Já geramos árvore **Rojo 7** (`default.project.json`) e `KeyframeSequence` R15 (`.rbxlx`) |
+
+**Resumo:** a única “IA de mesh neural de verdade” é um modelo treinado (Meshy/Tripo
+ou um `bpy`+rede local com GPU) — não se improvisa isso dentro do Godot/Studio. O que
+**dá** pra fazer nativamente, e o Arkher faz, é: (1) **escultura SDF própria** em
+Python (offline, em qualquer lugar), (2) **kernel Blender** opcional pra acabamento de
+produção, (3) **conector neural** de nuvem quando você tem a chave, e (4) **exportar
+arquivos que Godot e Roblox/Rojo abrem nativamente**. Tudo com a origem declarada
+(`sculpt`/`relief`/`provider:*`/`+blender`) — sem fingir capacidade que não existe.

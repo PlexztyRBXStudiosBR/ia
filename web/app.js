@@ -132,6 +132,14 @@ async function refreshStatus() {
     const prov = (State.status.capabilities && State.status.capabilities.mesh_ai_providers) || {};
     const provTxt = prov.active ? ("mesh IA: " + prov.active) : "mesh IA: offline (SDF/relevo)";
     pill.textContent = (State.status.numpy ? "numpy ✔" : "python puro") + " · até " + (State.status.texture_max >= 16384 ? "16k" : "2k") + " · " + provTxt;
+    const bl = (State.status.capabilities && State.status.capabilities.blender_kernel) || {};
+    const blEl = $("#mBlenderState");
+    if (blEl) {
+      blEl.textContent = bl.available
+        ? ("Blender " + (bl.version || "") + " detectado ✔ (kernel nativo ativo)")
+        : "Blender não instalado no servidor (o refino fica desativado; ARKHER_BLENDER ou `pip install bpy` ativam)";
+      blEl.style.color = bl.available ? "var(--ok, #4ade80)" : "";
+    }
     const agents = await api("/api/agents");
     renderAgents(agents.agents);
   } catch (e) {
@@ -412,6 +420,14 @@ function bindModel() {
         material: $("#mMaterial").value,
         source,
       };
+      const refineBl = ($("#mRefineBlender") || {}).checked;
+      if (refineBl) {
+        body.refine_blender = true;
+        if (body.rig) {
+          throw new Error("Refinar no Blender faz Voxel Remesh, que destrói o rig/skinning. " +
+            "Desmarque 'Com rig + animações' para refinar a malha estática no Blender.");
+        }
+      }
       if (source !== "primitives") {
         body.prompt = ($("#mPrompt").value || "").trim();
         body.sdf_resolution = +$("#mSdfRes").value;
@@ -482,10 +498,16 @@ async function renderModelResult(result) {
   const originNote = s.origin === "sculpt" || s.origin === "relief"
     ? `<div class="info-box">Malha orgânica real (SDF/surface nets ou relevo da sua imagem) — sem primitivas. Para IA generativa de nuvem, configure MESHY_API_KEY / TRIPO_API_KEY / ARKHER_MESH_AI_URL no servidor.</div>`
     : "";
+  const blenderBadge = s.blender
+    ? `<span class="badge ok">refinado no Blender ${escapeHtml(String(s.blender.blender_version || ""))} · ${s.blender.tris_before || "?"}→${s.blender.tris_after || "?"} tris · Remesh+SmartUV</span>`
+    : "";
+  const blenderNote = s.blender_skipped
+    ? `<div class="info-box">🔧 Blender: ${escapeHtml(String(s.blender_skipped))}</div>`
+    : (s.blender_error ? `<div class="info-box">⚠️ Blender falhou (${escapeHtml(String(s.blender_error))}) — malha Arkher mantida.</div>` : "");
   container.innerHTML = `
     <h2>Modelo pronto 🎉</h2>
-    <div>${originBadge}</div>
-    ${provErr}${rigSkip}${originNote}
+    <div>${originBadge}${blenderBadge}</div>
+    ${provErr}${rigSkip}${blenderNote}${originNote}
     <canvas class="viewer" id="glbViewer"></canvas>
     <div class="muted" style="margin:6px 0">arraste para girar · role para zoom</div>
     <div class="stats-grid">

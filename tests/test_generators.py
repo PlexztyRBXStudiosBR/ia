@@ -290,6 +290,56 @@ def test_image_pbr() -> None:
     check("providers desligados sem chaves", st["active"] in (None, "meshy", "tripo", "local"))
 
 
+def test_blender_bridge() -> None:
+    print("[blender — kernel nativo opcional]")
+    import os
+    import stat as _stat
+    import tempfile
+    import py_compile
+    from arkher import blender_bridge as bb
+    # o script bpy gerado é Python válido
+    tmp = tempfile.mkdtemp()
+    sp = os.path.join(tmp, "refine.py")
+    with open(sp, "w") as f:
+        f.write(bb.REFINE_SCRIPT)
+    try:
+        py_compile.compile(sp, doraise=True)
+        check("REFINE_SCRIPT é Python válido", True)
+    except Exception as e:  # noqa: BLE001
+        check("REFINE_SCRIPT é Python válido", False, str(e))
+    # sem Blender -> status honesto + BlenderUnavailable (fallback)
+    os.environ.pop("ARKHER_BLENDER", None)
+    st = bb.blender_status()
+    if not st["available"]:
+        check("status reporta indisponível + howto", bool(st["howto"]))
+        try:
+            bb.refine_glb(b"glTF" + b"\x00" * 40)
+            check("refine sem Blender levanta BlenderUnavailable", False)
+        except bb.BlenderUnavailable:
+            check("refine sem Blender levanta BlenderUnavailable", True)
+    else:
+        check("Blender disponível no ambiente (refino real ativo)", True)
+    # MOCK: valida todo o encadeamento (argv/cfg/subprocess/saída/stats) sem Blender real
+    mock = os.path.join(tmp, "blender")
+    with open(mock, "w") as f:
+        f.write("#!/usr/bin/env python3\n"
+                "import sys, json, shutil, os\n"
+                "cfgp=[a for a in reversed(sys.argv) if a.endswith('.json') and os.path.exists(a)][0]\n"
+                "cfg=json.load(open(cfgp)); shutil.copy(cfg['in_glb'], cfg['out_glb'])\n"
+                'print("ARKHER_BLENDER_OK " + json.dumps({"tris_before":10,"tris_after":5,"bytes":1}))\n')
+    os.chmod(mock, os.stat(mock).st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+    os.environ["ARKHER_BLENDER"] = mock
+    try:
+        glb = b"glTF" + b"\x02\x00\x00\x00" + b"\x00" * 60
+        out, meta = bb.refine_glb(glb)
+        check("encadeamento subprocess+cfg+saída (mock)", out == glb and meta["engine"] == "blender"
+              and meta["tris_after"] == 5)
+    finally:
+        os.environ.pop("ARKHER_BLENDER", None)
+        import shutil as _sh
+        _sh.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     test_png()
     test_models()
@@ -298,6 +348,7 @@ def main() -> int:
     test_sdf()
     test_bvh_mocap()
     test_image_pbr()
+    test_blender_bridge()
     test_godot_project()
     test_roblox_project()
     print(f"\n{PASS} passaram, {FAIL} falharam")

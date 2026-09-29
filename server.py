@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
 
 from arkher import HAS_NUMPY, animation as anim_mod, code_library, textures as tex_mod
-from arkher import bvh as bvh_mod, image_pbr, mesh_ai, meshes as mesh_mod, sdf as sdf_mod
+from arkher import blender_bridge, bvh as bvh_mod, image_pbr, mesh_ai, meshes as mesh_mod, sdf as sdf_mod
 from arkher.chat import AGENTS, respond
 from arkher.glb import GlbBuilder, Material
 from arkher.godot_project import generate_godot_project
@@ -296,7 +296,7 @@ def gen_model(body: Dict[str, Any]) -> Dict[str, Any]:
     if source in ("sculpt", "ai", "auto") and (prompt or image_bytes):
         mesh, meta = _sculpt_or_relief(prompt, image_bytes, name, sdf_res, seed)
         return _finish_mesh_model(mesh, meta, name, mat_name, seed, with_rig, animations,
-                                  model_type, body.get("_provider_error"))
+                                  model_type, body.get("_provider_error"), body)
 
     base_mat = tex_mod.MATERIALS.get(mat_name) or tex_mod.MATERIALS["generic"]
     tint = tuple(base_mat.get("base", (0.6, 0.6, 0.62)))  # type: ignore[arg-type]
@@ -309,6 +309,40 @@ def gen_model(body: Dict[str, Any]) -> Dict[str, Any]:
 
     return _gen_model_primitives(body, model_type, name, detail, seed, with_lods,
                                  with_rig, animations, res, mat_name, material)
+
+
+def _maybe_refine_blender(files: Dict[str, bytes], name: str, body: Dict[str, Any],
+                          stats: Dict[str, Any]) -> None:
+    """Refina a malha estática no Blender (Voxel Remesh + Decimate + Smart UV + smooth).
+
+    Só para malha SEM rig: remesh destruiria o skinning. Se o Blender não existe,
+    declara honestamente em stats['blender_skipped'] e mantém a malha Arkher."""
+    if not body.get("refine_blender"):
+        return
+    static_key = f"{name}.glb"
+    if static_key not in files:
+        stats["blender_skipped"] = (
+            "refino no Blender é para malha estática; o modelo saiu rigged e o Voxel "
+            "Remesh destruiria o skinning — desmarque 'rig' para refinar no Blender")
+        return
+    try:
+        refined, meta = blender_bridge.refine_glb(
+            files[static_key],
+            voxel=float(body.get("blender_voxel", 0.03)),
+            ratio=float(body.get("blender_ratio", 0.5)),
+            uv=bool(body.get("blender_uv", True)),
+            timeout=float(body.get("blender_timeout", 240)),
+        )
+        files[static_key] = refined
+        stats["origin"] = str(stats.get("origin", "procedural")) + "+blender"
+        stats["blender"] = meta
+        stats["bytes"] = sum(len(v) for v in files.values())
+    except blender_bridge.BlenderUnavailable as e:
+        stats["blender_skipped"] = f"Blender não detectado — malha Arkher mantida. {e}"
+    except blender_bridge.BlenderError as e:
+        stats["blender_error"] = str(e)
+    except Exception as e:  # noqa: BLE001
+        stats["blender_error"] = f"{e.__class__.__name__}: {e}"
 
 
 def _sculpt_or_relief(prompt: str, image_bytes: Optional[bytes], name: str,
@@ -325,7 +359,8 @@ def _sculpt_or_relief(prompt: str, image_bytes: Optional[bytes], name: str,
 
 def _finish_mesh_model(mesh, meta: Dict[str, Any], name: str, mat_name: str, seed: int,
                        with_rig: bool, animations: Sequence[str], model_type: str,
-                       provider_error: Optional[str]) -> Dict[str, Any]:
+                       provider_error: Optional[str], body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    body = body or {}
     """Empacota uma malha orgânica (sculpt/relief) como asset .glb."""
     base_mat = tex_mod.MATERIALS.get(mat_name) or tex_mod.MATERIALS["generic"]
     tint = tuple(base_mat.get("base", (0.78, 0.76, 0.74)))  # type: ignore[arg-type]
@@ -374,6 +409,7 @@ def _finish_mesh_model(mesh, meta: Dict[str, Any], name: str, mat_name: str, see
         if with_rig:
             stats["rig_skipped"] = ("rig automático disponível apenas para esculturas "
                                     "humanóide/busto; envie um BVH na aba Animações para rig+mo-cap")
+    _maybe_refine_blender(files, name, body, stats)
     stats["files"] = list(files.keys())
     stats["bytes"] = sum(len(v) for v in files.values())
     aid = _store_put("model", files, stats)
@@ -440,6 +476,7 @@ def _gen_model_primitives(body, model_type, name, detail, seed, with_lods, with_
                 for i, l in enumerate(lods)
             ]
 
+    _maybe_refine_blender(files, name, body, stats)
     stats["files"] = list(files.keys())
     stats["bytes"] = sum(len(v) for v in files.values())
     aid = _store_put("model", files, stats)
@@ -744,6 +781,7 @@ class Handler(BaseHTTPRequestHandler):
                         "mesh_sdf_sculpt": True,
                         "mesh_from_image_relief": True,
                         "mesh_ai_providers": providers,
+                        "blender_kernel": blender_bridge.blender_status(),
                         "mocap_bvh_import": True,
                         "jobs_async": True,
                         "roblox_keyframes": True,
@@ -867,6 +905,8 @@ def main() -> None:
     print(f"  numpy:      {'SIM (texturas/SDF até 16k rápidas)' if HAS_NUMPY else 'NÃO (texturas limitadas a 2k; pip install numpy)'}")
     _prov = mesh_ai.provider_status()
     print(f"  mesh AI:    {_prov['active'] or 'offline (sculpt/relevo; MESHY_API_KEY / TRIPO_API_KEY / ARKHER_MESH_AI_URL ativam nuvem)'}")
+    _bl = blender_bridge.blender_status()
+    print(f"  Blender:    {('ON (' + (_bl['version'] or _bl['mode']) + ') — remesh/UV nativos') if _bl['available'] else 'off (ARKHER_BLENDER ou `pip install bpy` habilitam o kernel nativo)'}")
     print(f"  LLM bridge: {'ON' if os.environ.get('ARKHER_LLM_API_KEY') else 'off (ARKHER_LLM_API_KEY)'}")
     print("=" * 64)
     try:
