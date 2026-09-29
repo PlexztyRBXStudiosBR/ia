@@ -1,6 +1,6 @@
 /* Service worker: shell offline-first, API network-first. */
 const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/offline.js', '/icon.png', '/manifest.webmanifest'];
-const CACHE = 'arkher-shell-v1';
+const CACHE = 'arkher-shell-v2';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

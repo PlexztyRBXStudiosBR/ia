@@ -160,7 +160,29 @@
       <div class="grid2">
         <div class="card form-card">
           <h2>Modelo 3D (.glb)</h2>
-          <p class="muted">Malha com normais + UVs + material PBR, LODs por decimação e, para personagens, rig de 22 ossos com animações.</p>
+          <p class="muted">Três fontes de malha: <b>escultura SDF orgânica</b> (texto → surface nets, sem primitivas),
+          <b>IA generativa</b> (Meshy/Tripo/servidor local, quando configurado) e <b>primitivas</b> (rápido, com LODs).
+          Você pode enviar uma <b>imagem</b>: vira relevo 3D real (offline) ou image-to-3D (com provedor).</p>
+          <label>Fonte da malha
+            <select id="mSource">
+              <option value="sculpt" selected>Escultura orgânica SDF (por texto)</option>
+              <option value="ai">IA generativa (Meshy / Tripo / local)</option>
+              <option value="primitives">Primitivas compostas (rápido + LODs)</option>
+            </select>
+          </label>
+          <div id="mAiFields">
+            <label>Descrição textual
+              <textarea id="mPrompt" rows="2" maxlength="800" placeholder="ex: guerreiro bárbaro musculoso com espinhos nos ombros"></textarea>
+            </label>
+            <label>Imagem de referência (opcional)
+              <input type="file" id="mImage" accept="image/png,image/jpeg,image/webp">
+              <span class="muted">Sem provedor de IA: a imagem vira um baixo-relevo 3D real. Com Meshy/Tripo: image-to-3D.</span>
+            </label>
+            <label>Resolução da escultura: <output id="mSdfOut">48</output>
+              <input type="range" id="mSdfRes" min="24" max="96" step="8" value="48">
+              <span class="muted">Mais alto = mais detalhes e mais tempo (96 pode levar ~1 min sem numpy).</span>
+            </label>
+          </div>
           <label>Tipo
             <select id="mType">
               <option value="hero">Herói / personagem</option>
@@ -210,6 +232,10 @@
           </label>
           <label>Seed<input id="tSeed" type="number" value="1337" style="width:110px"></label>
           <label class="chk"><input type="checkbox" id="tTile" checked> Seamless (tileável)</label>
+          <label>Ou derive da SUA foto
+            <input type="file" id="tImage" accept="image/png,image/jpeg,image/webp">
+            <span class="muted">Com foto: albedo = sua imagem; normal/roughness/AO/height derivados dela (material da grade é ignorado).</span>
+          </label>
           <button class="primary-btn" id="tGenerate">⚡ Gerar mapas</button>
           <span class="muted" id="tEta"></span>
         </div>
@@ -224,7 +250,11 @@
       <div class="grid2">
         <div class="card form-card">
           <h2>Rig + animações</h2>
-          <p class="muted">Esqueleto humanóide de 22 ossos, skinning automático e takes keyframeados. Exporta .glb (Godot/Blender), AnimationLibrary (.tres) e KeyframeSequence R15 (.rbxlx) para o Roblox.</p>
+          <p class="muted">Esqueleto humanóide de 22 ossos, skinning automático e takes com suavização por slerp + follow-through. Exporta .glb (Godot/Blender), AnimationLibrary (.tres) e KeyframeSequence R15 (.rbxlx) para o Roblox.</p>
+          <label>🎬 Mo-cap real: envie um .bvh (Mixamo, CMU, Blender…)
+            <input type="file" id="aBvh" accept=".bvh,text/plain">
+            <span class="muted">O movimento é retargetado com IK de 2 ossos para o rig Arkher e exportado junto (glb + rbxlx + tres).</span>
+          </label>
           <div class="chips" id="aAnims"></div>
           <label>FPS de amostragem
             <select id="aFps"><option>30</option><option selected>60</option></select>
@@ -266,9 +296,11 @@
             <tr><td>Texturas PBR seamless 512 → 16k (6 canais)</td><td class="ok">✔ REAL</td><td>19 receitas procedurais (numpy opcional)</td></tr>
             <tr><td>Export de animação p/ Roblox (.rbxlx R15)</td><td class="ok">✔ REAL</td><td>KeyframeSequence com CFrames por pose</td></tr>
             <tr><td>App Android (APK)</td><td class="ok">✔ REAL</td><td>Capacitor WebView + modo offline; build via GitHub Actions</td></tr>
-            <tr><td>Modelos esculturais de personagem (estátua, rosto…)</td><td class="warn">◐ PARCIAL</td><td>Procedural por primitivas; escultura artística precisa de DCC/IA de mesh</td></tr>
-            <tr><td>Texturas autorais específicas (logo, tatuagem, rosto)</td><td class="warn">◐ PARCIAL</td><td>Conector de API de imagem opcional (chave do usuário)</td></tr>
-            <tr><td>Animação com qualidade de mo-cap de estúdio</td><td class="warn">◐ PARCIAL</td><td>Base procedural sólida; polimento manual recomendado</td></tr>
+            <tr><td>Malhas orgânicas por texto (escultura SDF + surface nets)</td><td class="ok">✔ REAL</td><td>Escultura paramétrica offline — humanóide/criatura/rocha/busto com músculos, espinhos, semente</td></tr>
+            <tr><td>Texto/imagem → 3D por IA generativa (Meshy/Tripo/local)</td><td class="warn">◐ PARCIAL</td><td>Real COM chave de API configurada; sem chave, a imagem vira relevo 3D real e o texto vira escultura SDF</td></tr>
+            <tr><td>Mo-cap de estúdio (importar .bvh e retargetar)</td><td class="ok">✔ REAL</td><td>Parser BVH + FK + IK de 2 ossos no rig de 22 ossos; dados reais de Mixamo/CMU/Blender</td></tr>
+            <tr><td>PBR derivado da SUA foto (albedo/normal/roughness/AO/height)</td><td class="ok">✔ REAL</td><td>Até 2k sem numpy, até 16k com numpy; ampliação além do original usa micro-detalhe procedural (honesto: não cria informação que não existe)</td></tr>
+            <tr><td>Animação procedural com acabamento "mo-cap"</td><td class="warn">◐ PARCIAL</td><td>Slerp + follow-through em cascata; ótima para protótipo — para qualidade final, importe mo-cap real (.bvh)</td></tr>
             <tr><td>"Jogo AAA completo sozinho em dias"</td><td class="no">✘ MITO</td><td>Nenhuma IA faz isso hoje. O Arkher acelera o pipeline real de produção.</td></tr>
           </tbody>
         </table>
@@ -279,7 +311,11 @@
    │                                                ├─ glb.py             (glTF 2.0 binário)
    │                                                ├─ animation.py       (rig + takes + R15)
    │                                                ├─ textures.py        (PBR procedural)
-   │                                                └─ meshes.py          (primitivas + LODs)
+   │                                                ├─ meshes.py          (primitivas + LODs)
+   │                                                ├─ sdf.py             (escultura SDF + surface nets)
+   │                                                ├─ bvh.py             (mo-cap: parse + retarget IK)
+   │                                                ├─ mesh_ai.py         (Meshy/Tripo/local + relevo)
+   │                                                └─ image_pbr.py       (foto → conjunto PBR)
    └── APK (Capacitor WebView) ── mesmo site, com geradores JS offline</pre>
         <h2>App Android</h2>
         <p>O APK empacota este site num WebView. Ele funciona em <strong>dois modos</strong>:</p>

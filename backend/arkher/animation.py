@@ -25,8 +25,10 @@ from .meshes import make_model
 
 __all__ = [
     "BONE_DEFS", "build_humanoid_skeleton", "auto_skin", "make_animation",
+    "smooth_animation", "add_secondary_motion",
     "ANIMATION_PRESETS", "build_rigged_glb", "export_godot_animation_library",
-    "export_roblox_keyframe_sequence", "bone_world_positions",
+    "export_roblox_keyframe_sequence", "export_roblox_keyframe_sequence_custom",
+    "bone_world_positions",
 ]
 
 # nome -> (pai, translação local em metros)
@@ -486,6 +488,82 @@ _KEYFN = {
 }
 
 
+def smooth_animation(anim: Animation, strength: float = 0.35) -> Animation:
+    """
+    Passa-baixa por slerp: q'[i] = slerp(q[i], média(q[i-1], q[i+1]), strength).
+    Remove o aspecto 'seno robótico' e o jitter de retarget mo-cap.
+    """
+    if strength <= 0.0 or len(anim.tracks) == 0:
+        return anim
+    out_tracks: List[AnimationTrack] = []
+    for tr in anim.tracks:
+        rots, trans = tr.rotations, tr.translations
+        new_rots, new_trans = rots, trans
+        if rots and len(rots) >= 3:
+            fixed: List[Tuple[float, float, float, float]] = []
+            for q in rots:
+                if fixed and sum(a * b for a, b in zip(fixed[-1], q)) < 0.0:
+                    q = (-q[0], -q[1], -q[2], -q[3])
+                fixed.append(q)
+            new_rots = [fixed[0]]
+            for i in range(1, len(fixed) - 1):
+                a, b, c = fixed[i - 1], fixed[i], fixed[i + 1]
+                mid = m3d.quat_normalize((
+                    (a[0] + c[0]) * 0.5, (a[1] + c[1]) * 0.5,
+                    (a[2] + c[2]) * 0.5, (a[3] + c[3]) * 0.5))
+                new_rots.append(m3d.quat_slerp(b, mid, min(1.0, strength)))
+            new_rots.append(fixed[-1])
+        if trans and len(trans) >= 3:
+            new_trans = [trans[0]]
+            for i in range(1, len(trans) - 1):
+                a, b, c = trans[i - 1], trans[i], trans[i + 1]
+                new_trans.append((
+                    b[0] + ((a[0] + c[0]) * 0.5 - b[0]) * strength,
+                    b[1] + ((a[1] + c[1]) * 0.5 - b[1]) * strength,
+                    b[2] + ((a[2] + c[2]) * 0.5 - b[2]) * strength,
+                ))
+            new_trans.append(trans[-1])
+        out_tracks.append(AnimationTrack(
+            bone=tr.bone, times=tr.times, rotations=new_rots,
+            translations=new_trans, scales=tr.scales,
+        ))
+    return Animation(name=anim.name, tracks=out_tracks)
+
+
+_BONE_DEPTH: Optional[List[int]] = None
+
+
+def _bone_depths() -> List[int]:
+    global _BONE_DEPTH
+    if _BONE_DEPTH is None:
+        depths = []
+        for _name, parent, _tr in BONE_DEFS:
+            depths.append(0 if parent < 0 else depths[parent] + 1)
+        _BONE_DEPTH = depths
+    return _BONE_DEPTH
+
+
+def add_secondary_motion(anim: Animation, max_lag: int = 4) -> Animation:
+    """
+    Follow-through / overlap: ossos mais distantes da raiz 'atrasam' alguns
+    samples em relação aos pais — o mesmo princípio que anima chicotes,
+    cabelo e tecido. Em loops, o atraso é uma rotação cíclica dos samples.
+    """
+    depths = _bone_depths()
+    out: List[AnimationTrack] = []
+    for tr in anim.tracks:
+        lag = min(depths[tr.bone] if tr.bone < len(depths) else 0, max_lag)
+        rots = tr.rotations
+        if rots and lag and len(rots) > lag * 3:
+            rots = list(rots[-lag:]) + list(rots[:-lag])
+        trans = tr.translations
+        if trans and lag and len(trans) > lag * 3:
+            trans = list(trans[-lag:]) + list(trans[:-lag])
+        out.append(AnimationTrack(bone=tr.bone, times=tr.times, rotations=rots,
+                                  translations=trans, scales=tr.scales))
+    return Animation(name=anim.name, tracks=out)
+
+
 def make_animation(name: str = "walk", fps: int = 60, speed: float = 1.0,
                    samples_per_cycle: int = 32) -> Tuple[Animation, Dict[str, object]]:
     preset = ANIMATION_PRESETS.get(name) or ANIMATION_PRESETS["idle"]
@@ -521,12 +599,17 @@ def make_animation(name: str = "walk", fps: int = 60, speed: float = 1.0,
         meta = {"kind": "procedural", "frames": frames}
 
     anim = Animation(name=name, tracks=tracks)
+    loop = bool(preset.get("loop", True))
+    # acabamento 'mo-cap': passa-baixa por slerp + atraso em cascata (follow-through)
+    anim = smooth_animation(anim, strength=0.30 if meta.get("kind") == "keyed" else 0.22)
+    if loop and meta.get("kind") != "keyed":
+        anim = add_secondary_motion(anim)
     info = {
         "name": name,
         "label": preset.get("label", name),
         "fps": fps,
         "duration": round(duration, 4),
-        "loop": bool(preset.get("loop", True)),
+        "loop": loop,
         "tracks": len(tracks),
         "bones_animated": len({t.bone for t in tracks}),
         **meta,
@@ -542,8 +625,10 @@ def build_rigged_glb(
     material: Optional[Material] = None,
     fps: int = 60,
     speed: float = 1.0,
+    mesh_override: Optional[MeshData] = None,
+    custom_anims: Sequence[Tuple[Animation, Dict[str, object]]] = (),
 ) -> Tuple[bytes, Dict[str, object]]:
-    mesh = make_model(model_type, name=name, detail=detail)
+    mesh = mesh_override if mesh_override is not None else make_model(model_type, name=name, detail=detail)
     bones = build_humanoid_skeleton()
     auto_skin(mesh, bones)
     if material is None:
@@ -567,14 +652,24 @@ def build_rigged_glb(
     mesh_node = b.add_node(f"{name}_mesh", mesh=mesh_idx, skin=skin_idx)
     root = b.add_node(name, children=[mesh_node] + bone_nodes)
 
-    infos = []
-    for a in animations:
-        anim, info = make_animation(a, fps=fps, speed=speed)
-        # os tracks apontam para índices de osso -> converte para índices de nó
+    def _emit(anim: Animation, info: Dict[str, object]) -> None:
         for tr in anim.tracks:
+            # glTF: o canal "translation" é ABSOLUTO — somar o delta procedural
+            # à translação de bind do osso (antes, os quadris colapsavam para y≈0)
+            if tr.translations:
+                bx, by, bz = bones[tr.bone].translation
+                tr.translations = [(bx + dx, by + dy, bz + dz) for (dx, dy, dz) in tr.translations]
+            # os tracks apontam para índices de osso -> converte para índices de nó
             tr.bone = bone_nodes[tr.bone]
         b.add_animation(anim)
         infos.append(info)
+
+    infos = []
+    for a in animations:
+        anim, info = make_animation(a, fps=fps, speed=speed)
+        _emit(anim, info)
+    for anim, info in custom_anims:  # ex.: mo-cap retargetado de BVH
+        _emit(anim, info)
 
     data = b.build(scene_name=name, root_nodes=[root], asset_name=name)
     stats = {
@@ -600,7 +695,6 @@ def export_godot_animation_library(animations: Sequence[str], glb_path: str = "r
         '',
     ]
     for i, a in enumerate(animations):
-        anim, info = make_animation(a, fps=fps)
         lines.append(f'[ext_resource type="Animation" path="{glb_path}:{a}" id="{i + 1}_{a}"]')
     lines.append('')
     lines.append('[resource]')
@@ -626,6 +720,12 @@ def export_roblox_keyframe_sequence(name: str = "walk", fps: int = 60, speed: fl
     Asset Manager -> Bulk Import -> selecione o .rbxlx -> depois Animation Editor.
     """
     anim, info = make_animation(name, fps=fps, speed=speed)
+    return export_roblox_keyframe_sequence_custom(anim, info, name=name, fps=fps)
+
+
+def export_roblox_keyframe_sequence_custom(anim: Animation, info: Dict[str, object],
+                                           name: str = "mocap", fps: int = 30) -> str:
+    """KeyframeSequence R15 a partir de um Animation qualquer (ex.: BVH retargetado)."""
     bones = build_humanoid_skeleton()
 
     # motor Roblox -> osso do nosso esqueleto
@@ -686,8 +786,9 @@ def export_roblox_keyframe_sequence(name: str = "walk", fps: int = 60, speed: fl
                 best_d, best_i = d, i
         return lst[best_i][1], lst[best_i][2]
 
-    duration = float(info["duration"])
+    duration = float(info.get("duration") or 1.0)
     frame_count = max(1, int(round(duration * fps)))
+    frame_count = min(frame_count, 3600)
     uid = [0]
 
     def _ref(prefix: str) -> str:
@@ -743,7 +844,7 @@ def export_roblox_keyframe_sequence(name: str = "walk", fps: int = 60, speed: fl
         '    <Properties>',
         f'      <string name="Name">{name}_arkher</string>',
         f'      <string name="AuthorName">Arkher AI</string>',
-        f'      <bool name="Loop">{"true" if info["loop"] else "false"}</bool>',
+        f'      <bool name="Loop">{"true" if info.get("loop") else "false"}</bool>',
         '      <token name="Priority">3</token>',
         '    </Properties>',
     ]

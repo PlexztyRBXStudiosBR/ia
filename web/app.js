@@ -32,6 +32,42 @@ async function api(path, opts = {}) {
   return res;
 }
 
+async function runJob(kind, body, onPoll) {
+  // Geração assíncrona: POST /api/jobs -> poll /api/jobs/<id>.
+  // Evita "failed to fetch" em gerações longas (SDF, mo-cap, texturas 4k+)
+  // que derrubavam o timeout do fetch no celular.
+  const created = await api("/api/jobs", { method: "POST", body: JSON.stringify({ kind, body }) });
+  if (!created || !created.job_id) throw new Error("servidor não criou o job (atualize o server.py)");
+  const t0 = Date.now();
+  for (;;) {
+    await sleep(900);
+    const j = await api("/api/jobs/" + created.job_id);
+    const secs = (Date.now() - t0) / 1000;
+    if (onPoll) onPoll(j, secs);
+    if (j.status === "done") return j.result;
+    if (j.status === "error") throw new Error(j.error || ("erro no job (" + (j.error_type || "?") + ")"));
+    if (secs > 1800) throw new Error("job excedeu 30 min — tente reduzir resolução/detalhe");
+  }
+}
+
+function fileToB64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = () => reject(new Error("falha ao ler o arquivo"));
+    r.readAsDataURL(file);
+  });
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error("falha ao ler o arquivo"));
+    r.readAsText(file);
+  });
+}
+
 function fmtBytes(n) {
   if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
   if (n > 1024) return (n / 1024).toFixed(1) + " KB";
@@ -93,7 +129,9 @@ async function refreshStatus() {
     State.status = await api("/api/status");
     badge.className = "conn online";
     text.textContent = State.server ? "servidor: " + State.server : "servidor local";
-    pill.textContent = (State.status.numpy ? "numpy ✔" : "python puro") + " · até " + (State.status.texture_max >= 16384 ? "16k" : "2k");
+    const prov = (State.status.capabilities && State.status.capabilities.mesh_ai_providers) || {};
+    const provTxt = prov.active ? ("mesh IA: " + prov.active) : "mesh IA: offline (SDF/relevo)";
+    pill.textContent = (State.status.numpy ? "numpy ✔" : "python puro") + " · até " + (State.status.texture_max >= 16384 ? "16k" : "2k") + " · " + provTxt;
     const agents = await api("/api/agents");
     renderAgents(agents.agents);
   } catch (e) {
@@ -268,7 +306,7 @@ function bindGodot() {
         const files = ArkherOffline.godotProject(body);
         data = offlineProjectResult(files, "godot", body.name);
       } else {
-        data = await api("/api/generate/project", { method: "POST", body: JSON.stringify(body) });
+        data = await runJob("project", body);
       }
       renderProjectResult($("#gResult"), data);
     } catch (e) {
@@ -293,7 +331,7 @@ function bindRoblox() {
         const files = ArkherOffline.robloxProject(body);
         data = offlineProjectResult(files, "roblox", body.name);
       } else {
-        data = await api("/api/generate/project", { method: "POST", body: JSON.stringify(body) });
+        data = await runJob("project", body);
       }
       renderProjectResult($("#rResult"), data);
     } catch (e) {
@@ -342,6 +380,19 @@ function bindModel() {
     if (e.target.classList.contains("chip")) e.target.classList.toggle("on");
   });
   $("#mDetail").addEventListener("input", (e) => ($("#mDetailOut").textContent = e.target.value));
+  const srcSel = $("#mSource");
+  const syncSource = () => {
+    const v = srcSel.value;
+    $("#mAiFields").hidden = (v === "primitives");
+    $("#mType").closest("label").hidden = (v !== "primitives");
+    const rigRow = $("#mRigRow");
+    if (rigRow) rigRow.hidden = false;
+  };
+  if (srcSel) {
+    srcSel.addEventListener("change", syncSource);
+    syncSource();
+    $("#mSdfRes").addEventListener("input", (e) => ($("#mSdfOut").textContent = e.target.value));
+  }
 
   $("#mGenerate").addEventListener("click", async () => {
     const btn = $("#mGenerate");
@@ -350,17 +401,35 @@ function bindModel() {
     $("#mProgressText").textContent = "gerando malha, UVs e material…";
     try {
       const anims = $$("#mAnims .chip.on").map((c) => c.dataset.anim);
+      const source = ($("#mSource") || {}).value || "primitives";
       const body = {
         type: $("#mType").value,
         name: $("#mName").value || $("#mType").value,
         detail: +$("#mDetail").value,
         lods: $("#mLods").checked,
-        rig: $("#mRig").checked && ["hero", "humanoid", "npc", "creature"].includes($("#mType").value),
+        rig: $("#mRig").checked && (source !== "primitives" || ["hero", "humanoid", "npc", "creature"].includes($("#mType").value)),
         animations: anims,
         material: $("#mMaterial").value,
+        source,
       };
+      if (source !== "primitives") {
+        body.prompt = ($("#mPrompt").value || "").trim();
+        body.sdf_resolution = +$("#mSdfRes").value;
+        const f = $("#mImage").files && $("#mImage").files[0];
+        if (f) {
+          $("#mProgressText").textContent = "enviando imagem (" + fmtBytes(f.size) + ")…";
+          body.image_b64 = await fileToB64(f);
+        }
+        if (!body.prompt && !body.image_b64) {
+          throw new Error("Escreva uma descrição ou envie uma imagem (ou escolha 'Primitivas').");
+        }
+      }
       let result;
       if (State.offline || !State.status) {
+        if (body.source && body.source !== "primitives") {
+          throw new Error("Escultura SDF, IA generativa e relevo de imagem rodam no servidor Python. " +
+            "Offline eu gero modelos por primitivas — conecte o servidor (aba Configurações) para malha orgânica.");
+        }
         await sleep(300);
         const mesh = ArkherOffline.buildModel(body.type, body.detail);
         const glb = ArkherOffline.buildGlb(mesh, { name: body.name + "_mat" }, body.name);
@@ -379,6 +448,12 @@ function bindModel() {
           },
           glbInline: glb,
         };
+      } else if (body.source && body.source !== "primitives") {
+        result = await runJob("model", body, (j, secs) => {
+          $("#mProgressText").textContent = j.status === "running"
+            ? `esculpindo malha orgânica… ${secs.toFixed(0)}s (job ${j.status})`
+            : `na fila… ${secs.toFixed(0)}s`;
+        });
       } else {
         result = await api("/api/generate/model", { method: "POST", body: JSON.stringify(body) });
       }
@@ -399,8 +474,18 @@ async function renderModelResult(result) {
     ? s.animations.map((a) => `<span class="badge info">${a.name} ${a.duration}s</span>`).join(" ")
     : "";
   const lods = s.lods ? s.lods.map((l) => `<span class="badge info">LOD${l.level}: ${l.triangles} tris</span>`).join(" ") : "";
+  const originBadge = s.origin
+    ? `<span class="badge ${String(s.origin).startsWith("provider") ? "ok" : "info"}">origem: ${escapeHtml(String(s.origin))}${s.sculpt_kind ? " · " + escapeHtml(s.sculpt_kind) : ""}</span>`
+    : "";
+  const provErr = s.provider_error ? `<div class="info-box">⚠️ Provedor de IA indisponível (${escapeHtml(String(s.provider_error))}) — usei a rota offline (escultura/relevo).</div>` : "";
+  const rigSkip = s.rig_skipped ? `<div class="info-box">${escapeHtml(String(s.rig_skipped))}</div>` : "";
+  const originNote = s.origin === "sculpt" || s.origin === "relief"
+    ? `<div class="info-box">Malha orgânica real (SDF/surface nets ou relevo da sua imagem) — sem primitivas. Para IA generativa de nuvem, configure MESHY_API_KEY / TRIPO_API_KEY / ARKHER_MESH_AI_URL no servidor.</div>`
+    : "";
   container.innerHTML = `
     <h2>Modelo pronto 🎉</h2>
+    <div>${originBadge}</div>
+    ${provErr}${rigSkip}${originNote}
     <canvas class="viewer" id="glbViewer"></canvas>
     <div class="muted" style="margin:6px 0">arraste para girar · role para zoom</div>
     <div class="stats-grid">
@@ -434,16 +519,37 @@ async function renderModelResult(result) {
   };
   dl.appendChild(zb);
 
-  // preview
+  // preview — com verificação robusta (antes, erro do servidor virava "não é glb")
   let glbBytes = result.glbInline;
   if (!glbBytes) {
     const mainFile = files.find((f) => f.endsWith(".glb") && !f.includes("lods")) || files.find((f) => f.endsWith(".glb"));
     if (mainFile) {
-      const res = await fetch(apiBase() + "/api/asset/" + result.asset_id + "/" + mainFile);
-      glbBytes = new Uint8Array(await res.arrayBuffer());
+      try {
+        const res = await fetch(apiBase() + "/api/asset/" + result.asset_id + "/" + mainFile);
+        if (!res.ok) throw new Error("HTTP " + res.status + " ao baixar " + mainFile);
+        glbBytes = new Uint8Array(await res.arrayBuffer());
+        const isGlb = glbBytes.length > 20 && glbBytes[0] === 0x67 && glbBytes[1] === 0x6c
+          && glbBytes[2] === 0x54 && glbBytes[3] === 0x46;
+        if (!isGlb) {
+          let msg = "resposta não é um GLB";
+          try { msg = JSON.parse(new TextDecoder().decode(glbBytes)).error || msg; } catch (_) {}
+          throw new Error(msg + " (o asset pode ter expirado — gere novamente)");
+        }
+      } catch (e) {
+        const cv = $("#glbViewer");
+        if (cv) cv.outerHTML = `<div class="info-box">⚠️ Preview indisponível: ${escapeHtml(e.message)}. Os downloads abaixo continuam válidos.</div>`;
+        return;
+      }
     }
   }
-  if (glbBytes) startViewer($("#glbViewer"), glbBytes);
+  if (glbBytes) {
+    try {
+      startViewer($("#glbViewer"), glbBytes);
+    } catch (e) {
+      const cv = $("#glbViewer");
+      if (cv) cv.outerHTML = `<div class="info-box">⚠️ Viewer: ${escapeHtml(e.message)}</div>`;
+    }
+  }
 }
 
 function downloadBytes(bytes, name) {
@@ -603,20 +709,37 @@ function bindTextures() {
     $("#tProgress").hidden = false;
     const mat = ($(".mat-card.selected") || {}).dataset?.mat || "stone";
     const resSel = $("#tRes").value;
-    $("#tProgressText").textContent = `gerando ${resSel} de ${mat}… (mapas PBR)`;
+    const imgFile = ($("#tImage").files && $("#tImage").files[0]) || null;
+    $("#tProgressText").textContent = imgFile
+      ? `derivando PBR da sua foto em ${resSel}…`
+      : `gerando ${resSel} de ${mat}… (mapas PBR)`;
     const t0 = performance.now();
     try {
-      if (State.offline || !State.status) {
+      if (imgFile && imgFile.size > 40 * 1024 * 1024) throw new Error("imagem grande demais (máx 40 MB)");
+      if (imgFile && (State.offline || !State.status)) {
+        throw new Error("Derivar PBR da sua foto roda no servidor Python. Conecte o servidor (aba Configurações) — offline eu gero texturas procedurais.");
+      }
+      if (!imgFile && (State.offline || !State.status)) {
         const size = Math.min(1024, { "512": 512, "1k": 1024, "2k": 1024, "4k": 1024, "8k": 1024, "16k": 1024 }[resSel]);
         await sleep(50);
         const maps = ArkherOffline.generateTextures(mat, size, +$("#tSeed").value || 7);
         renderTexturePreviewOffline(mat, size, maps);
       } else {
-        const data = await api("/api/generate/textures", {
-          method: "POST",
-          body: JSON.stringify({ material: mat, resolution: resSel, seed: +$("#tSeed").value || 1337, tile: $("#tTile").checked }),
-        });
-        renderTexturePreview(mat, data);
+        const body = { material: mat, resolution: resSel, seed: +$("#tSeed").value || 1337, tile: $("#tTile").checked };
+        let data;
+        if (imgFile) {
+          body.image_b64 = await fileToB64(imgFile);
+          data = await runJob("textures", body, (j, secs) => {
+            $("#tProgressText").textContent = `derivando PBR da foto… ${secs.toFixed(0)}s`;
+          });
+        } else if (resSel === "4k" || resSel === "8k" || resSel === "16k") {
+          data = await runJob("textures", body, (j, secs) => {
+            $("#tProgressText").textContent = `gerando ${resSel} de ${mat}… ${secs.toFixed(0)}s`;
+          });
+        } else {
+          data = await api("/api/generate/textures", { method: "POST", body: JSON.stringify(body) });
+        }
+        renderTexturePreview(imgFile ? "foto" : mat, data);
       }
     } catch (e) {
       $("#tPreview").innerHTML = `<div class="empty-state">Erro: ${escapeHtml(e.message)}</div>`;
@@ -642,11 +765,16 @@ function renderTexturePreview(mat, data) {
     const url = apiBase() + "/api/asset/" + data.asset_id + "/" + m.file;
     return `<div class="tex-item"><img loading="lazy" src="${url}" alt="${m.channel}"><div class="cap"><b>${m.channel}</b><span>${m.color_space} · ${fmtBytes(m.bytes)}</span></div></div>`;
   }).join("");
+  const secs = data.stats.seconds != null ? data.stats.seconds : data.stats.elapsed_s;
+  const mp = data.stats.megapixels != null ? data.stats.megapixels
+    : (data.stats.source ? data.stats.source.megapixels + " MP (foto original)" : "?");
+  const derived = data.derived_from_image ? `<span class="badge ok">derivado da sua foto (${escapeHtml(String((data.stats.source || {}).format || "?"))} ${((data.stats.source || {}).width || "?")}×${((data.stats.source || {}).height || "?")})</span>` : "";
   box.innerHTML = `
     <div style="grid-column:1/-1">
       <span class="badge ok">${data.stats.size}px</span>
-      <span class="badge info">${data.stats.seconds}s</span>
-      <span class="badge info">${data.stats.megapixels} MP/mapa</span>
+      ${secs != null ? `<span class="badge info">${secs}s</span>` : ""}
+      <span class="badge info">${mp} MP/mapa</span>
+      ${derived}
       ${data.capped ? `<span class="badge warn">limitado a ${data.stats.size}px: ${escapeHtml(data.limit_reason || "")}</span>` : ""}
       <div class="dl-row" style="display:inline-flex;margin-left:12px">
         <button class="dl-btn" onclick="location.href='${apiBase()}/api/download/textures/${data.asset_id}'">⬇ Baixar pacote PBR (.zip)</button>
@@ -697,9 +825,15 @@ function bindAnimation() {
       if (State.offline || !State.status) {
         throw new Error("Animações com rig completo rodam no servidor conectado. Offline eu gero o modelo base na aba Modelo 3D.");
       }
-      const data = await api("/api/generate/animation", {
-        method: "POST",
-        body: JSON.stringify({ animations: anims, fps: +$("#aFps").value, detail: +$("#aDetail").value }),
+      const body = { animations: anims, fps: +$("#aFps").value, detail: +$("#aDetail").value };
+      const bvhFile = ($("#aBvh").files && $("#aBvh").files[0]) || null;
+      if (bvhFile) {
+        if (bvhFile.size > 60 * 1024 * 1024) throw new Error("BVH grande demais (máx 60 MB)");
+        $("#aProgressText").textContent = "lendo .bvh e retargetando mo-cap…";
+        body.bvh = await fileToText(bvhFile);
+      }
+      const data = await runJob("animation", body, (j, secs) => {
+        $("#aProgressText").textContent = `gerando rig + takes… ${secs.toFixed(0)}s`;
       });
       const s = data.stats;
       $("#aResult").innerHTML = `
@@ -710,11 +844,12 @@ function bindAnimation() {
           <div class="stat"><b>${s.animations.length}</b><span>takes</span></div>
           <div class="stat"><b>${fmtBytes(s.bytes)}</b><span>pacote</span></div>
         </div>
-        <div>${s.animations.map((a) => `<span class="badge info">${a.name} · ${a.duration}s · ${a.frames} frames · ${a.bones_animated} ossos</span>`).join(" ")}</div>
+        <div>${(s.animations || []).map((a) => `<span class="badge ${a.kind === "mocap" ? "ok" : "info"}">${a.name} · ${a.duration}s · ${a.frames} frames · ${a.bones_animated} ossos${a.kind === "mocap" ? " · MO-CAP REAL" : ""}</span>`).join(" ")}</div>
+        ${s.mocap ? `<div class="info-box">🎬 Mo-cap importado: ${s.mocap.source_frames} frames @ ${s.mocap.source_fps}fps do seu .bvh → ${s.mocap.frames} frames retargetados com IK (escala ${s.mocap.scale}). Juntas mapeadas: ${Object.keys(s.mocap.mapped_joints || {}).length}.</div>` : ""}
         <div class="dl-row">
           <button class="dl-btn" onclick="location.href='${apiBase()}/api/asset/${data.asset_id}/character_rigged.glb'">⬇ character_rigged.glb</button>
           <button class="dl-btn" onclick="location.href='${apiBase()}/api/asset/${data.asset_id}/godot_animation_library.tres'">⬇ Godot .tres</button>
-          ${anims.map((a) => `<button class="dl-btn" onclick="location.href='${apiBase()}/api/asset/${data.asset_id}/roblox_${a}.rbxlx'">⬇ R15 ${a}.rbxlx</button>`).join("")}
+          ${(s.files || []).filter((f) => f.endsWith(".rbxlx")).map((f) => `<button class="dl-btn" onclick="location.href='${apiBase()}/api/asset/${data.asset_id}/${f}'">⬇ R15 ${f.replace("roblox_", "").replace(".rbxlx", "")}.rbxlx</button>`).join("")}
           <button class="dl-btn" onclick="location.href='${apiBase()}/api/download/animation/${data.asset_id}'">⬇ tudo (.zip)</button>
         </div>
         <div class="info-box">No Godot: importe o .glb e os takes aparecem no AnimationPlayer com esses nomes. No Roblox Studio: Animation Editor → importe o .rbxlx e publique o asset.</div>

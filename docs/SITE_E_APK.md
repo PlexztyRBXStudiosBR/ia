@@ -70,6 +70,37 @@ export ARKHER_LLM_BASE=https://api.openai.com/v1
 export ARKHER_LLM_MODEL=gpt-4o-mini
 ```
 
+### Conector de IA generativa de malha (opcional)
+
+Sem nenhuma chave, o Arkher já faz **escultura SDF orgânica por texto** e
+**relevo 3D real a partir de imagem** — 100% offline e honesto. Para ligar
+IA generativa de nuvem (texto/imagem → 3D por rede neural), configure **um** dos:
+
+```bash
+export MESHY_API_KEY=msy_...            # Meshy (text-to-3d e image-to-3d)
+export TRIPO_API_KEY=...                # Tripo3D (text_to_model e image_to_model)
+export ARKHER_MESH_AI_URL=http://SEU_PC:PORT/generate   # servidor local próprio
+```
+
+O servidor local (`ARKHER_MESH_AI_URL`) aceita `POST {"prompt", "image_b64"}` e
+devolve `{"glb_b64": ...}` ou bytes `.glb` — use para plugar TripoSR / Hunyuan3D /
+Stable Fast 3D num PC com GPU. `GET /api/status` reporta quais provedores estão
+ativos; a UI mostra o estado real e nunca finge geração neural onde não há.
+
+### Geração assíncrona (jobs) — por que não dá "failed to fetch"
+
+Escultura SDF, mo-cap e texturas 4k+ podem levar dezenas de segundos. Num celular
+(Termux/4G) uma requisição síncrona longa estoura o timeout do `fetch` e aparecia
+como **"failed to fetch"**. Agora essas rotas usam **jobs**:
+
+```
+POST /api/jobs        {"kind":"model|textures|animation|project", "body":{...}}  -> {"job_id"}
+GET  /api/jobs/<id>   -> {"status":"pending|running|done|error", "result"?, "error"?}
+```
+
+A UI cria o job e faz *polling* a cada ~0,9 s até concluir — sem conexão mantida
+aberta, sem timeout. Os endpoints síncronos antigos continuam funcionando.
+
 ---
 
 ## 2. O que cada aba entrega (arquivos reais)
@@ -78,9 +109,9 @@ export ARKHER_LLM_MODEL=gpt-4o-mini
 |---|---|---|
 | Projeto Godot | Projeto 4.3 completo: `project.godot` (input map, autoloads), cenas `.tscn` (nível, player, inimigo, HUD, menu), scripts `.gd`, shaders `.gdshader`, `default_env.tres` (SDFGI/SSAO/glow/fog), GDD, ícone | `.zip` |
 | Projeto Roblox | Árvore Rojo 7: `default.project.json`, serviços Luau server-authoritative (Combate/Loja/Perfil), RemoteEvents `.model.json`, HUD ScreenGui, arena, Lighting Future | `.zip` |
-| Modelo 3D | `.glb` com normais/UVs/material PBR + LODs (`*_lods.glb`); personagens saem **rigged** (22 ossos, 4 influências/vértice) com animações embutidas | `.glb` / `.zip` |
-| Texturas | 6 mapas PBR seamless (albedo sRGB, normal, roughness, metallic, AO, height) de 512 px a 16k + `.tres` de material + README de uso | `.zip` |
-| Animações | `character_rigged.glb` (takes: idle/walk/run/sprint/jump/attack/wave/dance/death/crouch), `godot_animation_library.tres`, `roblox_<take>.rbxlx` (KeyframeSequence R15) | `.zip` |
+| Modelo 3D | 3 fontes: **escultura SDF orgânica** (surface nets, humanóide/criatura/rocha/busto por texto, sem primitivas), **IA generativa** (Meshy/Tripo/local) e **primitivas** (rápido + LODs). Imagem enviada → **relevo 3D real**. Personagens saem **rigged** (22 ossos) | `.glb` / `.zip` |
+| Texturas | 6 mapas PBR seamless (albedo sRGB, normal, roughness, metallic, AO, height) de 512 px a 16k **procedurais** *ou* **derivados da sua foto** + `.tres` de material + README | `.zip` |
+| Animações | `character_rigged.glb` (takes procedurais com suavização slerp + follow-through), **import de mo-cap `.bvh`** (Mixamo/CMU/Blender) retargetado com IK de 2 ossos, `godot_animation_library.tres`, `roblox_<take>.rbxlx` (R15) | `.zip` |
 | Código | Biblioteca de padrões AAA (GDScript/Luau/GLSL) com busca | copiar/baixar |
 
 Validação automática: todo `.tscn/.tres/project.godot` passa por um validador de
@@ -164,7 +195,8 @@ O site tem `manifest.webmanifest` + service worker: no Chrome/Edge do celular,
 ## 5. Testes
 
 ```bash
-python tests/test_generators.py        # 60 checagens: PNG, glTF, .tscn, Rojo, R15
+python tests/test_generators.py        # 83 checagens: PNG, glTF, .tscn, Rojo, R15,
+                                       # SDF (escultura), BVH (mo-cap), foto→PBR/relevo
 ```
 
 O CI (`.github/workflows/ci.yml`) roda os testes em Python puro **e** com numpy,
@@ -177,11 +209,20 @@ mais um smoke test do servidor (status + 3 gerações via HTTP).
 O Arkher **não** é um botão de “jogo AAA pronto”. Ele é um acelerador de pipeline
 que entrega *assets e código reais e importáveis*:
 
-* Modelos: procedurais (primitivas compostas + LODs por decimação). Não substitui
-  escultura/retopologia de artista para heróis de close-up.
-* Animações: keyframes procedurais com IK-aproximado e envelopes — base sólida
-  para polir, não mo-cap de estúdio.
-* Texturas: PBR procedural seamless de altíssima qualidade técnica; arte autoral
-  específica (logos, rostos, tatuagens) pede modelo de imagem (conector de API).
+* **Modelos — escultura SDF orgânica (REAL):** humanóide/criatura/rocha/busto por
+  *surface nets* sobre campos de distância assinada, com músculos/espinhos/semente
+  guiados pelo texto. Geometria orgânica de verdade, **não** primitivas. Ainda não
+  é retopologia de artista para heróis de close-up — para isso, ligue um provedor.
+* **Modelos — IA generativa (PARCIAL):** texto/imagem → 3D por rede neural só com
+  chave Meshy/Tripo ou servidor local configurado. Sem chave, a **imagem vira um
+  baixo-relevo 3D real** (heightfield da luminância) e o texto vira escultura SDF —
+  a origem (`sculpt`/`relief`/`provider:*`) vem declarada no resultado.
+* **Mo-cap (REAL):** importe um `.bvh` (Mixamo/CMU/Blender) e o movimento é
+  retargetado com FK + IK analítico de 2 ossos para o rig de 22 ossos — dados reais,
+  contato de pé preservado. As animações procedurais têm suavização slerp +
+  follow-through em cascata: ótimas para protótipo, não substituem mo-cap autoral.
+* **Texturas (REAL):** PBR procedural seamless até 16k *ou* derivado da **sua foto**
+  (albedo = imagem; normal/roughness/AO/height derivados). Honesto: ampliar além da
+  resolução original adiciona micro-detalhe procedural — não cria informação mágica.
 * “Jogo AAA completo em dias por IA”: não existe hoje. O que existe — e é o que o
   Arkher faz — é encurtar semanas de setup/produção para horas.

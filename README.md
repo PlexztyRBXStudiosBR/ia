@@ -15,9 +15,10 @@ No site você conversa com os 9 especialistas e gera, de verdade:
 
 * **Projeto Godot 4.3 completo** (.zip que abre no editor: cenas, scripts, HUD, menu, lighting, shaders, GDD) — validado no formato `.tscn` 3
 * **Projeto Roblox** (Rojo 7 + Luau server-authoritative com anti-exploit, DataStore e HUD)
-* **Modelos `.glb`** com UVs/normais/material PBR e LODs — personagens saem **rigged** (22 ossos) com animações
-* **Texturas PBR seamless** 512 px → 16k (albedo/normal/roughness/metallic/AO/height, 19 materiais)
-* **Animações** exportadas para Godot (`.tres`) e Roblox (KeyframeSequence R15 `.rbxlx`)
+* **Modelos `.glb`** por **escultura SDF orgânica** (surface nets — humanóide/criatura/rocha/busto a partir de texto, *sem* primitivas), **IA generativa** (Meshy/Tripo/local) ou primitivas + LODs; envie uma **imagem** → **relevo 3D real**. Personagens saem **rigged** (22 ossos)
+* **Texturas PBR** 512 px → 16k **procedurais** (19 materiais) *ou* **derivadas da sua foto** (albedo/normal/roughness/metallic/AO/height)
+* **Animações** com suavização slerp + follow-through e **import de mo-cap `.bvh`** (Mixamo/CMU/Blender) retargetado com IK de 2 ossos — exportadas para Godot (`.tres`) e Roblox (KeyframeSequence R15 `.rbxlx`)
+* Geração pesada roda como **job assíncrono** (`POST /api/jobs` + polling) — chega de "failed to fetch" no celular
 
 O **APK Android** empacota o mesmo site num WebView com modo offline (geradores JS
 no aparelho). O build é feito pelo GitHub Actions: **Actions → "Arkher APK (Android)" → Run workflow**

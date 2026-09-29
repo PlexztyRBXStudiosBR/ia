@@ -40,9 +40,13 @@ AGENTS: List[Dict[str, object]] = [
 _INTENT_RULES: List[Tuple[str, List[str], str]] = [
     ("roblox_project", ["projeto roblox", "criar jogo roblox", "jogo no roblox", "roblox"], "roblox"),
     ("godot_project", ["projeto godot", "criar jogo", "jogo godot", "criar um jogo", "novo jogo"], "godot"),
-    ("model", ["modelo", "mesh", "3d", "glb", "personagem 3d", "espada", "árvore", "pedra", "casa", "prop"], "artist3d"),
-    ("texture", ["textura", "pbr", "albedo", "normal map", "roughness", "material", "4k", "8k", "16k"], "texture"),
-    ("animation", ["anima", "animacao", "rig", "skeleton", "esqueleto", "walk", "idle", "run", "jump", "keyframe"], "rigger"),
+    ("model", ["modelo", "mesh", "3d", "glb", "personagem 3d", "espada", "árvore", "pedra", "casa", "prop",
+               "escultura", "sculpt", "sdf", "orgânico", "organico", "relevo", "imagem 3d", "foto 3d",
+               "texto pra 3d", "texto para 3d", "generativa", "meshy", "tripo"], "artist3d"),
+    ("texture", ["textura", "pbr", "albedo", "normal map", "roughness", "material", "4k", "8k", "16k",
+                 "foto", "minha imagem", "da minha foto"], "texture"),
+    ("animation", ["anima", "animacao", "rig", "skeleton", "esqueleto", "walk", "idle", "run", "jump", "keyframe",
+                   "mocap", "mo-cap", "bvh", "mixamo", "captura de movimento", "retarget"], "rigger"),
     ("lighting", ["luz", "ilumina", "gi", "lightmap", "sombra", "hdr", "ambiente", "céu", "ceu"], "lighting"),
     ("perf", ["fps", "lento", "trava", "performance", "otimiz", "draw call", "profiling", "memória", "memoria"], "perf"),
     ("code", ["código", "codigo", "script", "gdscript", "luau", "função", "funcao", "como faço", "como fazer"], "gameplay"),
@@ -79,17 +83,28 @@ aba de texturas que eu já configuro o material certo.""",
     },
     "model": {
         "agent": "artist3d",
-        "text": """Modelo 3D eu gero de verdade aqui: malha com normais e UVs, material PBR e
-export em .glb válido (abre no Godot, no Blender e importa no Roblox Studio). Tenho
-presets de herói, criatura, árvore, pedra, espada, casa, terreno e prop — e ainda
-entrego LODs por decimação (LOD0/1/2/3) com contagem de triângulos honesta.
+        "text": """Modelo 3D eu gero de verdade aqui, com **três fontes** — você escolhe na aba:
+
+1. **Escultura SDF orgânica** (o padrão): esculpo por *campos de distância assinada*
+   e extraio a malha com *surface nets* — humanóide, criatura, rocha ou busto com
+   volume anatômico real (músculos, espinhos, semente), **não** primitivas encaixadas.
+   Você descreve em texto ("bárbaro musculoso com espinhos") e eu esculo.
+2. **IA generativa** (Meshy/Tripo/servidor local): texto **ou imagem** → 3D por rede
+   neural, quando há chave configurada (`GET /api/status` mostra o provedor ativo).
+3. **Primitivas** (rápido): presets de herói, árvore, espada, casa, terreno e prop,
+   com LODs por decimação (LOD0–3).
+
+**Envia uma imagem?** Sem provedor eu faço um **baixo-relevo 3D real** da foto
+(heightfield da luminância, com volume fechado) — geometria de verdade derivada dos
+seus pixels. Com provedor, vira image-to-3D neural. A origem (`sculpt`/`relief`/
+`provider:*`) vem declarada no resultado, sem enganação.
 
 Para personagem, o .glb sai **rigged**: esqueleto humanóide de 22 ossos com skinning
-de 4 influências por vértice e animações embutidas. Usa a aba **Modelo 3D** e marca
-"com rig e animações".
+de 4 influências por vértice e animações embutidas — marca "com rig e animações".
 
-Dica de orçamento de polígonos: herói 40–70k tris, NPC 15–25k, prop 2–8k, tile de
-cenário < 250k. Se passar disso, me chama que eu decimo.""",
+Dica de orçamento: herói 40–70k tris, NPC 15–25k, prop 2–8k. Escultura em resolução
+alta (slider 96) passa disso fácil; sem numpy ela demora ~1 min — por isso roda como
+*job* assíncrono, sem "failed to fetch". Se precisar decimar, me chama.""",
         "actions": [{"label": "Gerar modelo 3D", "tab": "model"}],
     },
     "texture": {
@@ -104,10 +119,12 @@ Gera na aba **Texturas**. No Godot liga o normal map com strength 1.0 e deixa o
 roughness/metallic em canais lineares (o zip já vem com o .tres de material pronto).
 No Roblox, fica em 1024 px no máximo.
 
-E sendo honesta com você: isso é PBR **procedural** de altíssima qualidade técnica —
-para textura autoral com detalhe específico (uma tatuagem, um logo), o caminho é
-gerar com modelo de imagem (a aba tem o conector de API) e depois eu faço o restante
-do set PBR em cima dela.""",
+E o melhor: agora eu derivo o set PBR **da SUA foto**. Sobe uma imagem na aba
+**Texturas** e o albedo vira a sua foto, com normal/roughness/AO/height calculados a
+partir dela (até 2k sem numpy, até 16k com numpy). Sendo honesta: ampliar uma foto
+512 px para 16k adiciona **micro-detalhe procedural** — eu não invento informação que
+não existe no original, só dou textura plausível em cima. Para arte 100% autoral
+(um logo vetorial, um rosto específico), o ideal ainda é um modelo de imagem generativo.""",
         "actions": [{"label": "Gerar texturas PBR", "tab": "textures"}],
     },
     "animation": {
@@ -123,9 +140,16 @@ O .glb sai com os takes embutidos (o Godot importa direto no AnimationPlayer). P
 Roblox eu exporto **KeyframeSequence (.rbxlx)** na hierarquia R15 exata que o Studio
 espera, com CFrames por pose — importa pelo Animation Editor e publica o assetid.
 
-A régua que eu uso: 60 fps de amostragem, interpolação linear entre keys, root motion
-limpo. Precisão de 0.05 cm é meta de mo-cap de estúdio grande — aqui a entrega é
-procedural e honesta, e serve como base excelente para polir em cima.""",
+**Mo-cap de verdade:** importa um `.bvh` (Mixamo, CMU, Blender) na aba Animações que
+eu faço o *retarget* — parser BVH, forward-kinematics e **IK analítico de 2 ossos**
+(ombro→pulso, quadril→tornozelo, com o polo real do cotovelo/joelho) para o rig de 22
+ossos, escala automática pela altura e contato de pé preservado. Sai `.glb` + `.rbxlx`
+R15 + `.tres` com o seu movimento real, não inventado.
+
+Os takes procedurais ganharam acabamento de mo-cap: **suavização por slerp** + 
+**follow-through em cascata** (ossos distais atrasam um pouco os pais — o princípio de
+chicote/cabelo). A régua: até 60 fps, root motion limpo. Para qualidade final de
+estúdio, o caminho honesto é importar mo-cap autoral (.bvh) — que eu já retargeto.""",
         "actions": [{"label": "Gerar rig + animações", "tab": "animation"}],
     },
     "lighting": {

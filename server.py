@@ -11,6 +11,8 @@ Endpoints:
     GET  /api/status            -> capacidades reais do backend
     GET  /api/agents            -> os 9 especialistas
     POST /api/chat              -> conversa com o time
+    POST /api/jobs              -> geração assíncrona (job_id) — evita timeout no celular
+    GET  /api/jobs/<id>         -> estado/resultado do job
     POST /api/generate/project  -> projeto Godot/Roblox (zip)
     POST /api/generate/model    -> .glb (com LODs, rig e animações)
     POST /api/generate/textures -> mapas PBR (png + zip)
@@ -36,14 +38,14 @@ import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
 
 from arkher import HAS_NUMPY, animation as anim_mod, code_library, textures as tex_mod
-from arkher import meshes as mesh_mod
+from arkher import bvh as bvh_mod, image_pbr, mesh_ai, meshes as mesh_mod, sdf as sdf_mod
 from arkher.chat import AGENTS, respond
 from arkher.glb import GlbBuilder, Material
 from arkher.godot_project import generate_godot_project
@@ -51,12 +53,77 @@ from arkher.pnglib import make_icon
 from arkher.roblox_project import generate_roblox_project
 from arkher.tscn_validate import validate_files
 
+try:
+    import base64 as _b64
+except Exception:  # pragma: no cover
+    _b64 = None
+
 MAX_TEXTURE_PURE = 2048
 MAX_TEXTURE_NUMPY = 16384
 STORE_CAP_BYTES = 384 * 1024 * 1024
+MAX_BODY_BYTES = 64 * 1024 * 1024
+JOB_TTL_S = 1800
 
 _store: Dict[str, Dict[str, Any]] = {}
 _store_lock = threading.Lock()
+
+# ------------------------------------------------------------------ jobs
+# Gerações pesadas (SDF, mo-cap, texturas 4k+, IA de nuvem) rodam em threads:
+# o celular faz POST /api/jobs e consulta GET /api/jobs/<id> — sem "failed to
+# fetch" por timeout de conexão.
+_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
+
+
+def _jobs_prune() -> None:
+    now = time.time()
+    with _jobs_lock:
+        for jid in [k for k, v in _jobs.items() if now - v["ts"] > JOB_TTL_S]:
+            del _jobs[jid]
+        if len(_jobs) > 128:  # mantém os mais recentes
+            for jid in sorted(_jobs, key=lambda k: _jobs[k]["ts"])[: len(_jobs) - 128]:
+                del _jobs[jid]
+
+
+def _job_run(jid: str, kind: str, body: Dict[str, Any]) -> None:
+    fn = _JOB_KINDS.get(kind)
+    with _jobs_lock:
+        _jobs[jid]["status"] = "running"
+        _jobs[jid]["ts"] = time.time()
+    try:
+        result = fn(body)
+        with _jobs_lock:
+            _jobs[jid].update(status="done", result=result, ts=time.time())
+    except Exception as e:  # noqa: BLE001
+        with _jobs_lock:
+            _jobs[jid].update(status="error", error=str(e),
+                              error_type=e.__class__.__name__, ts=time.time())
+    _jobs_prune()
+
+
+def job_create(kind: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    if kind not in _JOB_KINDS:
+        raise ValueError(f"tipo de job inválido: {kind} (use {', '.join(sorted(_JOB_KINDS))})")
+    jid = uuid.uuid4().hex[:12]
+    with _jobs_lock:
+        _jobs[jid] = {"kind": kind, "status": "pending", "created": time.time(), "ts": time.time()}
+    threading.Thread(target=_job_run, args=(jid, kind, body), daemon=True).start()
+    return {"job_id": jid, "kind": kind, "poll": f"/api/jobs/{jid}"}
+
+
+def job_get(jid: str) -> Optional[Dict[str, Any]]:
+    with _jobs_lock:
+        job = _jobs.get(jid)
+        if not job:
+            return None
+        out = {"job_id": jid, "kind": job["kind"], "status": job["status"],
+               "elapsed": round(time.time() - job["created"], 2)}
+        if job["status"] == "done":
+            out["result"] = job["result"]
+        elif job["status"] == "error":
+            out["error"] = job.get("error")
+            out["error_type"] = job.get("error_type")
+        return out
 
 
 def _store_put(kind: str, files: Dict[str, bytes], meta: Dict[str, Any]) -> str:
@@ -174,6 +241,19 @@ def gen_project(body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _decode_upload(value: Any) -> Optional[bytes]:
+    """Aceita base64 cru ou data URL (data:image/png;base64,...)."""
+    if not value or not isinstance(value, str):
+        return None
+    if "," in value and value.strip().lower().startswith("data:"):
+        value = value.split(",", 1)[1]
+    try:
+        import base64
+        return base64.b64decode(value, validate=False)
+    except Exception:  # noqa: BLE001
+        raise ValueError("upload inválido: base64 malformado")
+
+
 def gen_model(body: Dict[str, Any]) -> Dict[str, Any]:
     model_type = str(body.get("type", "prop"))
     name = str(body.get("name", "") or model_type).strip()[:60] or model_type
@@ -186,6 +266,37 @@ def gen_model(body: Dict[str, Any]) -> Dict[str, Any]:
     res = int(body.get("texture", 256))
     res = max(64, min(1024, res))
     mat_name = str(body.get("material", "generic"))
+    source = str(body.get("source", "primitives")).lower()   # primitives|sculpt|ai|auto
+    prompt = str(body.get("prompt", "") or "")[:2000]
+    image_bytes = _decode_upload(body.get("image_b64") or body.get("image"))
+    sdf_res = max(24, min(96 if not HAS_NUMPY else 128, int(body.get("sdf_resolution", 48))))
+
+    # ---------------- rota IA generativa / escultura / relevo ----------------
+    if source in ("ai", "sculpt", "auto") and (source != "sculpt") and (prompt or image_bytes):
+        st = mesh_ai.provider_status()
+        if source == "ai" or st["active"]:
+            try:
+                glb, meta = mesh_ai.generate_mesh(
+                    prompt=prompt, image_bytes=image_bytes,
+                    source="provider" if st["active"] else "auto",
+                    name=name, resolution=sdf_res,
+                    timeout_s=float(body.get("provider_timeout", 300)),
+                )
+                files = {f"{name}.glb": glb}
+                stats = {"type": model_type, "source": "ai", **meta}
+                stats["files"] = list(files)
+                stats["bytes"] = len(glb)
+                aid = _store_put("model", files, stats)
+                return {"asset_id": aid, "stats": stats}
+            except mesh_ai.MeshAIError as e:
+                # sem provedor/erro de nuvem: cai nas rotas offline e documenta
+                body = dict(body)
+                body["_provider_error"] = str(e)
+
+    if source in ("sculpt", "ai", "auto") and (prompt or image_bytes):
+        mesh, meta = _sculpt_or_relief(prompt, image_bytes, name, sdf_res, seed)
+        return _finish_mesh_model(mesh, meta, name, mat_name, seed, with_rig, animations,
+                                  model_type, body.get("_provider_error"))
 
     base_mat = tex_mod.MATERIALS.get(mat_name) or tex_mod.MATERIALS["generic"]
     tint = tuple(base_mat.get("base", (0.6, 0.6, 0.62)))  # type: ignore[arg-type]
@@ -195,6 +306,82 @@ def gen_model(body: Dict[str, Any]) -> Dict[str, Any]:
         metallic=float(base_mat.get("metal", 0.0)),  # type: ignore[arg-type]
         roughness=float(base_mat.get("rough", 0.7)),  # type: ignore[arg-type]
     )
+
+    return _gen_model_primitives(body, model_type, name, detail, seed, with_lods,
+                                 with_rig, animations, res, mat_name, material)
+
+
+def _sculpt_or_relief(prompt: str, image_bytes: Optional[bytes], name: str,
+                      sdf_res: int, seed: int):
+    if image_bytes:
+        img = image_pbr.decode_image(image_bytes)
+        mesh, meta = mesh_ai.image_to_relief(img, name=name)
+        meta["image"] = {"format": img.source_format, "width": img.width, "height": img.height}
+    else:
+        mesh, meta = mesh_ai.prompt_sculpt(prompt, seed=seed, resolution=sdf_res)
+    mesh.name = name
+    return mesh, meta
+
+
+def _finish_mesh_model(mesh, meta: Dict[str, Any], name: str, mat_name: str, seed: int,
+                       with_rig: bool, animations: Sequence[str], model_type: str,
+                       provider_error: Optional[str]) -> Dict[str, Any]:
+    """Empacota uma malha orgânica (sculpt/relief) como asset .glb."""
+    base_mat = tex_mod.MATERIALS.get(mat_name) or tex_mod.MATERIALS["generic"]
+    tint = tuple(base_mat.get("base", (0.78, 0.76, 0.74)))  # type: ignore[arg-type]
+    material = Material(
+        name=f"{name}_mat",
+        base_color=(tint[0], tint[1], tint[2], 1.0),
+        metallic=float(base_mat.get("metal", 0.0)),  # type: ignore[arg-type]
+        roughness=float(base_mat.get("rough", 0.68)),  # type: ignore[arg-type]
+    )
+    files: Dict[str, bytes] = {}
+    stats: Dict[str, Any] = {"type": model_type, **meta}
+    if provider_error:
+        stats["provider_error"] = provider_error
+
+    riggable = with_rig and meta.get("sculpt_kind") in ("humanoid", "bust")
+    if riggable:
+        data, rstats = anim_mod.build_rigged_glb(
+            animations=list(animations), name=name, material=material,
+            mesh_override=mesh,
+        )
+        files[f"{name}_rigged.glb"] = data
+        stats.update(rstats)
+        files["godot_animation_library.tres"] = anim_mod.export_godot_animation_library(
+            list(animations)).encode()
+        for a in animations:
+            files[f"roblox_{a}.rbxlx"] = anim_mod.export_roblox_keyframe_sequence(a).encode()
+    else:
+        mesh.material = material
+        b = GlbBuilder()
+        try:
+            pbr = tex_mod.generate_pbr_set(mat_name, "512", seed=seed,
+                                           channels=["albedo"], max_size=512)
+            alb = pbr.map("albedo")
+            if alb:
+                tex_idx = b.add_png_image(alb.png, f"{name}_albedo")
+                mat_idx = b.add_material(material, base_color_texture=tex_idx)
+            else:
+                mat_idx = b.add_material(material)
+        except Exception:  # noqa: BLE001
+            mat_idx = b.add_material(material)
+        mesh_idx = b.add_mesh(mesh, mat_idx)
+        root = b.add_node(name, mesh=mesh_idx)
+        files[f"{name}.glb"] = b.build(root_nodes=[root], asset_name=name)
+        stats.update({"vertices": mesh.vertex_count, "triangles": mesh.triangle_count,
+                      "bones": 0, "animations": []})
+        if with_rig:
+            stats["rig_skipped"] = ("rig automático disponível apenas para esculturas "
+                                    "humanóide/busto; envie um BVH na aba Animações para rig+mo-cap")
+    stats["files"] = list(files.keys())
+    stats["bytes"] = sum(len(v) for v in files.values())
+    aid = _store_put("model", files, stats)
+    return {"asset_id": aid, "stats": stats}
+
+
+def _gen_model_primitives(body, model_type, name, detail, seed, with_lods, with_rig,
+                          animations, res, mat_name, material) -> Dict[str, Any]:
 
     files: Dict[str, bytes] = {}
     stats: Dict[str, Any] = {"type": model_type, "detail": detail, "seed": seed}
@@ -265,6 +452,39 @@ def gen_textures(body: Dict[str, Any]) -> Dict[str, Any]:
     seed = int(body.get("seed", 1337))
     tile = bool(body.get("tile", True))
     channels = body.get("channels") or None
+
+    # ---------- rota: PBR derivado de FOTO/IMAGEM do usuário ----------
+    image_bytes = _decode_upload(body.get("image_b64") or body.get("image"))
+    if image_bytes:
+        img = image_pbr.decode_image(image_bytes)
+        pbr = image_pbr.image_to_pbr(
+            img, resolution=resolution, seed=seed, channels=channels,
+            metallic=float(body.get("metallic", 0.0)),
+            roughness_bias=float(body.get("roughness_bias", 0.55)),
+            detail_strength=float(body.get("detail_strength", 1.0)),
+            tile=tile,
+        )
+        size = pbr.size
+        files: Dict[str, bytes] = {}
+        maps = []
+        for m in pbr.maps:
+            fname = f"foto_{m.channel}_{size}.png"
+            files[fname] = m.png
+            maps.append({"channel": m.channel, "file": fname, "bytes": len(m.png),
+                         "color_space": m.color_space})
+        files["foto_material_godot.tres"] = _godot_material_tres("foto", pbr).encode()
+        files["README.txt"] = _texture_readme("foto (derivado da sua imagem)", size, pbr).encode()
+        aid = _store_put("textures", files, pbr.stats)
+        return {
+            "asset_id": aid,
+            "maps": maps,
+            "stats": pbr.stats,
+            "material_def": pbr.material_def,
+            "capped": bool(pbr.stats.get("capped")),
+            "requested": resolution,
+            "derived_from_image": True,
+            "limit_reason": pbr.stats.get("cap_reason") or None,
+        }
 
     size = tex_mod.resolution_px(resolution)
     limit = MAX_TEXTURE_NUMPY if HAS_NUMPY else MAX_TEXTURE_PURE
@@ -353,26 +573,64 @@ def gen_animation(body: Dict[str, Any]) -> Dict[str, Any]:
     model_type = str(body.get("model", "hero"))
     detail = max(1, min(4, int(body.get("detail", 2))))
 
+    # ---------- mo-cap REAL: arquivo BVH enviado pelo usuário ----------
+    custom: list = []
+    mocap_info: Optional[Dict[str, Any]] = None
+    bvh_text = body.get("bvh")
+    if not bvh_text:
+        bvh_bytes = _decode_upload(body.get("bvh_b64"))
+        if bvh_bytes:
+            bvh_text = bvh_bytes.decode("utf-8", errors="replace")
+    if bvh_text:
+        bvh_data = bvh_mod.parse_bvh(str(bvh_text))
+        mocap_anim, mocap_info = bvh_mod.retarget(
+            bvh_data, name=str(body.get("mocap_name", "mocap"))[:40] or "mocap",
+            fps=int(body.get("mocap_fps", 30)),
+            max_frames=int(body.get("max_frames", 900)),
+            smooth=float(body.get("smooth", 0.35)),
+        )
+        custom.append((mocap_anim, mocap_info))
+
+    preset_names = [n for n in names if n in anim_mod.ANIMATION_PRESETS]
+    if custom and not body.get("with_presets", True):
+        preset_names = []
     data, stats = anim_mod.build_rigged_glb(
-        animations=[n for n in names if n in anim_mod.ANIMATION_PRESETS],
+        animations=preset_names,
         model_type=model_type,
         name="ArkherCharacter",
         detail=detail,
         fps=fps,
+        custom_anims=custom,
     )
+    if mocap_info:
+        stats["mocap"] = mocap_info
+    all_names = preset_names + [a.name for (a, _i) in custom]
     files: Dict[str, bytes] = {"character_rigged.glb": data}
-    files["godot_animation_library.tres"] = anim_mod.export_godot_animation_library(names).encode()
-    for a in names:
-        if a in anim_mod.ANIMATION_PRESETS:
-            files[f"roblox_{a}.rbxlx"] = anim_mod.export_roblox_keyframe_sequence(a, fps=fps).encode()
+    files["godot_animation_library.tres"] = anim_mod.export_godot_animation_library(all_names).encode()
+    for a in preset_names:
+        files[f"roblox_{a}.rbxlx"] = anim_mod.export_roblox_keyframe_sequence(a, fps=fps).encode()
+    for (a, i) in custom:
+        files[f"roblox_{a.name}.rbxlx"] = anim_mod.export_roblox_keyframe_sequence_custom(
+            a, i, name=a.name, fps=min(60, max(20, int(i.get("fps", 30))))).encode()
+    if bvh_text:
+        files["mocap_source.bvh"] = str(bvh_text)[:8_000_000].encode()
     files["README.txt"] = (
         "character_rigged.glb  -> Godot 4 / Blender / Roblox Studio (import glTF)\n"
         "godot_animation_library.tres -> AnimationLibrary apontando para os takes do .glb\n"
         "roblox_*.rbxlx -> KeyframeSequence R15: Studio -> Animation Editor -> importar\n"
+        + ("mocap_source.bvh -> arquivo de mo-cap enviado (retargetado para o rig Arkher)\n" if bvh_text else "")
     ).encode()
     stats["files"] = list(files.keys())
     aid = _store_put("animation", files, stats)
     return {"asset_id": aid, "stats": stats}
+
+
+_JOB_KINDS = {
+    "project": gen_project,
+    "model": gen_model,
+    "textures": gen_textures,
+    "animation": gen_animation,
+}
 
 
 # ------------------------------------------------------------------ HTTP
@@ -405,6 +663,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY_BYTES:
+            raise ValueError(f"corpo grande demais ({length} bytes; máx {MAX_BODY_BYTES})")
         raw = self.rfile.read(length) if length else b"{}"
         try:
             return json.loads(raw.decode() or "{}")
@@ -446,6 +706,9 @@ class Handler(BaseHTTPRequestHandler):
                     if llm:
                         out["llm_error"] = llm
                     self._json(out)
+            elif path == "/api/jobs":
+                kind = str(body.get("kind", "")).lower()
+                self._json(job_create(kind, body.get("body") or body), 202)
             elif path == "/api/generate/project":
                 self._json(gen_project(body))
             elif path == "/api/generate/model":
@@ -462,11 +725,13 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- rotas
     def _api_get(self, path: str, qs: Dict[str, Any]) -> None:
         if path == "/api/status":
+            providers = mesh_ai.provider_status()
             self._json(
                 {
                     "name": "Arkher AI",
-                    "version": "1.0.0",
+                    "version": "1.1.0",
                     "numpy": HAS_NUMPY,
+                    "pillow": image_pbr.pillow_available(),
                     "texture_max": MAX_TEXTURE_NUMPY if HAS_NUMPY else MAX_TEXTURE_PURE,
                     "engines": ["godot", "roblox"],
                     "capabilities": {
@@ -475,14 +740,21 @@ class Handler(BaseHTTPRequestHandler):
                         "glb_models": True,
                         "glb_rigged_animated": True,
                         "pbr_textures": True,
+                        "pbr_from_image": True,
+                        "mesh_sdf_sculpt": True,
+                        "mesh_from_image_relief": True,
+                        "mesh_ai_providers": providers,
+                        "mocap_bvh_import": True,
+                        "jobs_async": True,
                         "roblox_keyframes": True,
                         "godot_animation_library": True,
                         "llm_bridge": bool(os.environ.get("ARKHER_LLM_API_KEY")),
                     },
                     "honest": [
-                        "Modelos 3D são procedurais (primitivas compostas + LODs), não esculturas de artista",
-                        "Animações são procedurais/keyframed — base excelente, não mo-cap de estúdio",
-                        "Texturas são PBR procedural seamless; para arte autoral use o conector de API de imagem",
+                        "Malhas: escultura SDF orgânica (surface nets) + relevo real da sua imagem; IA generativa de malha só com chave Meshy/Tripo ou servidor local configurado",
+                        "Mo-cap: importe um .bvh (Mixamo/CMU/Blender) e o movimento é retargetado com IK para o rig de 22 ossos — dados reais, não inventados",
+                        "Animações procedurais têm suavização por slerp + follow-through; são ótimas para protótipo, não substituem mo-cap autoral",
+                        "Texturas: PBR procedural seamless até 16k (com numpy) ou PBR derivado da SUA foto — ampliação além da resolução original adiciona micro-detalhe procedural, não informação mágica",
                         "Nenhuma IA hoje entrega um jogo AAA completo sozinha em dias: o Arkher acelera o pipeline real",
                     ],
                 }
@@ -493,6 +765,13 @@ class Handler(BaseHTTPRequestHandler):
             q = (qs.get("q") or [""])[0]
             engine = (qs.get("engine") or [""])[0]
             self._json({"snippets": code_library.search(q, engine)})
+        elif path.startswith("/api/jobs/"):
+            jid = path.split("/api/jobs/")[1].split("/")[0]
+            job = job_get(jid)
+            if job is None:
+                self._json({"error": "job não encontrado (ou expirou — refaça o pedido)"}, 404)
+            else:
+                self._json(job)
         elif path.startswith("/api/download/"):
             self._download(path.split("/api/download/")[1])
         elif path.startswith("/api/asset/"):
@@ -585,7 +864,9 @@ def main() -> None:
     print("=" * 64)
     print("  Arkher AI — servidor de geração")
     print(f"  URL:        http://localhost:{args.port}")
-    print(f"  numpy:      {'SIM (texturas até 16k rápidas)' if HAS_NUMPY else 'NÃO (texturas limitadas a 2k; pip install numpy)'}")
+    print(f"  numpy:      {'SIM (texturas/SDF até 16k rápidas)' if HAS_NUMPY else 'NÃO (texturas limitadas a 2k; pip install numpy)'}")
+    _prov = mesh_ai.provider_status()
+    print(f"  mesh AI:    {_prov['active'] or 'offline (sculpt/relevo; MESHY_API_KEY / TRIPO_API_KEY / ARKHER_MESH_AI_URL ativam nuvem)'}")
     print(f"  LLM bridge: {'ON' if os.environ.get('ARKHER_LLM_API_KEY') else 'off (ARKHER_LLM_API_KEY)'}")
     print("=" * 64)
     try:
