@@ -1,0 +1,15 @@
+{
+  "name": "Arkher AI — Estúdio de Game Dev",
+  "short_name": "Arkher AI",
+  "description": "IA multi-agente para Godot e Roblox: projetos, modelos 3D, texturas PBR e animações.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon.png", "sizes": "256x256", "type": "image/png" }
+  ]
+}

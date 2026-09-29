@@ -1,0 +1,15 @@
+{
+  "name": "arkher-ai-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App Android (WebView + geradores locais) do Arkher AI",
+  "scripts": {
+    "sync": "cap sync android",
+    "build:apk": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  }
+}

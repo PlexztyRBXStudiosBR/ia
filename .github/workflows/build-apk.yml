@@ -1,0 +1,98 @@
+name: Arkher APK (Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Tipo de build"
+        type: choice
+        default: debug
+        options:
+          - debug
+          - release
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - "web/**"
+      - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  apk:
+    name: Build APK (Capacitor + Gradle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependências do mobile
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Sincronizar web -> Android (Capacitor)
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Preparar keystore de release (se existir secret)
+        if: ${{ inputs.build_type == 'release' && secrets.ANDROID_KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          mkdir -p /tmp/keystore
+          echo "$KEYSTORE_B64" | base64 -d > /tmp/keystore/arkher.keystore
+          echo "ARKHER_KEYSTORE_FILE=/tmp/keystore/arkher.keystore" >> $GITHUB_ENV
+          echo "ARKHER_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "ARKHER_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "ARKHER_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
+
+      - name: Build APK (debug)
+        if: ${{ inputs.build_type != 'release' || secrets.ANDROID_KEYSTORE_B64 == '' }}
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Build APK (release assinado)
+        if: ${{ inputs.build_type == 'release' && secrets.ANDROID_KEYSTORE_B64 != '' }}
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Publicar artefatos
+        uses: actions/upload-artifact@v4
+        with:
+          name: arkher-ai-apk
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Resumo
+        if: always()
+        run: |
+          echo "## Build do APK concluído" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Baixe o artefato **arkher-ai-apk** nesta execução e instale no Android" >> $GITHUB_STEP_SUMMARY
+          echo "(habilite 'fontes desconhecidas'). O app abre o site embutido e pede o" >> $GITHUB_STEP_SUMMARY
+          echo "endereço do servidor Arkher (⚙ Servidor) ou roda em modo offline." >> $GITHUB_STEP_SUMMARY

@@ -4,3 +4,18 @@ __pycache__/
 test_output/
 workspace/
 projects/
+
+# node / mobile
+node_modules/
+mobile/node_modules/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/capacitor-cordova-android-plugins/build/
+mobile/android/local.properties
+*.apk
+*.aab
+
+# artefatos locais
+assets_gerados/
+*.glb
+!tests/fixtures/*.glb
